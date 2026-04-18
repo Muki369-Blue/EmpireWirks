@@ -885,8 +885,11 @@ def get_video_job_status(prompt_id: str) -> dict:
                 qr = requests.get(f"{COMFY_BASE}/queue", timeout=5)
                 qdata = qr.json()
                 running_ids = [item[1] for item in qdata.get("queue_running", [])]
+                pending_ids = [item[1] for item in qdata.get("queue_pending", [])]
                 if prompt_id in running_ids:
                     return {"status": "processing", "outputs": []}
+                if prompt_id in pending_ids:
+                    return {"status": "pending", "outputs": []}
             except Exception:
                 pass
             return {"status": "pending", "outputs": []}

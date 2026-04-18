@@ -73,8 +73,9 @@ def fetch_generation_status(remote_content_id: int) -> dict[str, Any]:
 def fetch_video_status(remote_content_id: int) -> dict[str, Any]:
     """GET video status on Shadow-Wirk with fallback for flaky /video-status responses."""
     primary_error: Optional[Exception] = None
+    primary_status: Optional[dict[str, Any]] = None
     try:
-        return _get_json(f"/video-status/{remote_content_id}")
+        primary_status = _get_json(f"/video-status/{remote_content_id}")
     except Exception as exc:
         primary_error = exc
         logger.warning("Shadow-Wirk /video-status/%s failed, falling back to /generations/%s/status: %s", remote_content_id, remote_content_id, exc)
@@ -83,8 +84,20 @@ def fetch_video_status(remote_content_id: int) -> dict[str, Any]:
         status_data = fetch_generation_status(remote_content_id)
         status_data.setdefault("outputs", [])
         status_data.setdefault("progress", 0)
+        if primary_status and primary_status.get("status") not in {None, "", "pending"}:
+            primary_status.setdefault("outputs", [])
+            primary_status.setdefault("progress", 0)
+            return primary_status
+        if primary_status and status_data.get("status") in {None, "", "pending"}:
+            primary_status.setdefault("outputs", [])
+            primary_status.setdefault("progress", 0)
+            return primary_status
         return status_data
     except Exception:
+        if primary_status:
+            primary_status.setdefault("outputs", [])
+            primary_status.setdefault("progress", 0)
+            return primary_status
         if primary_error:
             raise primary_error
         raise

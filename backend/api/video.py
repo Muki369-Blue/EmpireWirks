@@ -357,6 +357,9 @@ def get_video_status(content_id: int, db: Session = Depends(get_db)):
 
     result = comfy_api.get_video_job_status(content.comfy_job_id)
 
+    if result.get("status") == "pending" and content.status in {"processing", "pending"}:
+        result["status"] = "processing"
+
     if result["status"] == "completed" and result.get("outputs"):
         first_output = result["outputs"][0]
         content.file_path = first_output["filename"]
@@ -389,7 +392,7 @@ def get_video_status(content_id: int, db: Session = Depends(get_db)):
     else:
         if progress_pct > 0:
             result["progress"] = progress_pct
-        elif result["status"] == "processing" and content.created_at:
+        elif result["status"] in {"processing", "pending"} and content.created_at:
             elapsed = (datetime.now(timezone.utc) - content.created_at).total_seconds()
             est = min(int(elapsed / 300 * 95), 95)
             result["progress"] = max(est, 1)
