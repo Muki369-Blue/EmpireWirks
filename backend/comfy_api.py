@@ -28,9 +28,13 @@ from typing import Optional
 
 import requests
 
+try:
+    from .config import COMFY_PORT
+except ImportError:
+    from config import COMFY_PORT
+
 logger = logging.getLogger(__name__)
 
-COMFY_PORT = int(os.environ.get("COMFY_PORT", "8000"))
 COMFY_BASE = f"http://127.0.0.1:{COMFY_PORT}"
 CLIENT_ID = str(uuid.uuid4())
 

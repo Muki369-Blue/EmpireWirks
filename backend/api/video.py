@@ -18,18 +18,18 @@ try:
     from .. import comfy_api
     from ..services import jobs as jobs_service
     from ..services import shadowwirk as sw_service
+    from ..config import SHADOW_URL, MACHINE_LABEL
 except ImportError:
     from database import get_db, Persona, Content, JobState
     from schemas import VideoGenerationRequest
     import comfy_api
     from services import jobs as jobs_service
     from services import shadowwirk as sw_service
+    from config import SHADOW_URL, MACHINE_LABEL
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["video"])
-
-SHADOW_URL = os.environ.get("SHADOW_WIRKS_URL", "http://100.119.54.18:8800")
 OUTPUT_ROOT = Path(__file__).resolve().parent.parent.parent / "outputs"
 VAULT_DIR = Path.home() / "Documents" / "ComfyUI" / "output" / "Empire" / "vault"
 VAULT_DIR.mkdir(parents=True, exist_ok=True)
@@ -239,10 +239,10 @@ def generate_video(body: VideoGenerationRequest, persona_id: int = 0, db: Sessio
     db.refresh(content)
 
     try:
-        vjob = jobs_service.create_job(db, job_type="video", persona_id=persona_id if persona_id else None, content_id=content.id, payload={"prompt": full_prompt, "negative_prompt": body.negative_prompt, "start_image": body.start_image, "width": body.width, "height": body.height, "length": body.length, "steps": body.steps, "cfg": body.cfg, "lora_name": body.lora_name, "comfy_prompt_id": prompt_id, "mode": "i2v" if body.start_image else "t2v"}, machine="mac")
+        vjob = jobs_service.create_job(db, job_type="video", persona_id=persona_id if persona_id else None, content_id=content.id, payload={"prompt": full_prompt, "negative_prompt": body.negative_prompt, "start_image": body.start_image, "width": body.width, "height": body.height, "length": body.length, "steps": body.steps, "cfg": body.cfg, "lora_name": body.lora_name, "comfy_prompt_id": prompt_id, "mode": "i2v" if body.start_image else "t2v"}, machine=MACHINE_LABEL)
         jobs_service.transition(db, vjob, JobState.DISPATCHING)
         jobs_service.transition(db, vjob, JobState.RUNNING)
-        jobs_service.record_run(db, vjob, prompt=full_prompt, negative_prompt=body.negative_prompt, loras=[{"name": body.lora_name, "strength": 1.0}] if body.lora_name else None, backend="comfy", width=body.width, height=body.height, machine="mac")
+        jobs_service.record_run(db, vjob, prompt=full_prompt, negative_prompt=body.negative_prompt, loras=[{"name": body.lora_name, "strength": 1.0}] if body.lora_name else None, backend="comfy", width=body.width, height=body.height, machine=MACHINE_LABEL)
         db.commit()
     except Exception as exc:
         logger.warning("job mirror (video queue) skipped: %s", exc)

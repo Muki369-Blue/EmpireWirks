@@ -15,14 +15,14 @@ from fastapi.responses import Response
 try:
     from ..services import shadowwirk as sw_service
     from ..schemas import VideoGenerationRequest
+    from ..config import SHADOW_URL
 except ImportError:
     from services import shadowwirk as sw_service
     from schemas import VideoGenerationRequest
+    from config import SHADOW_URL
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/shadow", tags=["shadow-proxy"])
-
-SHADOW_URL = sw_service.SHADOW_URL
 
 
 def _require_online():

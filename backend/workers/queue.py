@@ -20,6 +20,7 @@ from backend.database import (
     CampaignTask,
 )
 from backend.services import jobs as jobs_service
+from backend.config import MACHINE_LABEL
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +206,7 @@ def _run_generation_job(db, job: GenerationJob):
         negative_prompt=payload.get("negative_prompt"),
         loras=[{"name": payload.get("lora"), "strength": 1.0}] if payload.get("lora") else None,
         backend="comfy",
-        machine="mac",
+        machine=MACHINE_LABEL,
     )
     db.commit()
 
@@ -258,7 +259,7 @@ def _run_generation_job(db, job: GenerationJob):
         try:
             cost = GenerationCostMetrics(
                 job_id=job.id,
-                machine="mac",
+                machine=MACHINE_LABEL,
                 job_type=job.job_type,
                 duration_seconds=float(waited),
                 estimated_cost_usd=0.0,

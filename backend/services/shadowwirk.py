@@ -16,9 +16,12 @@ from typing import Any, Optional
 
 import requests
 
-logger = logging.getLogger(__name__)
+try:
+    from ..config import IS_HUB, SHADOW_URL
+except ImportError:
+    from config import IS_HUB, SHADOW_URL
 
-SHADOW_URL = os.environ.get("SHADOW_WIRKS_URL", "http://100.119.54.18:8800")
+logger = logging.getLogger(__name__)
 
 # ── status cache ────────────────────────────────────────────────────
 
@@ -27,6 +30,8 @@ _shadow_lock = threading.Lock()
 
 
 def is_online() -> bool:
+    if not IS_HUB:
+        return False
     with _shadow_lock:
         return _shadow_status["online"]
 
@@ -46,6 +51,9 @@ def _ping_loop():
 
 def start_ping():
     """Start the background ping thread (called once at app startup)."""
+    if not IS_HUB:
+        logger.info("Shadow-Wirk ping disabled (EMPIRE_ROLE=%s)", "shadow")
+        return
     t = threading.Thread(target=_ping_loop, daemon=True, name="shadow-ping")
     t.start()
 

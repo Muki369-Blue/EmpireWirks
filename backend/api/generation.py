@@ -21,12 +21,14 @@ try:
     from .. import comfy_api
     from ..postprocess import process_completed_image, check_upscale_status
     from ..services import jobs as jobs_service
+    from ..config import MACHINE_LABEL
 except ImportError:
     from database import get_db, Persona, Content, JobState
     from schemas import GenerationRequest, GenerationOut
     import comfy_api
     from postprocess import process_completed_image, check_upscale_status
     from services import jobs as jobs_service
+    from config import MACHINE_LABEL
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +108,7 @@ def generate_images(persona_id: int, body: GenerationRequest, db: Session = Depe
             db.commit()
             db.refresh(content)
             try:
-                job = jobs_service.create_job(db, job_type="image", persona_id=persona.id, content_id=content.id, payload={"prompt": full_prompt, "lora": lora, "negative_prompt": body.negative_prompt}, machine="mac")
+                job = jobs_service.create_job(db, job_type="image", persona_id=persona.id, content_id=content.id, payload={"prompt": full_prompt, "lora": lora, "negative_prompt": body.negative_prompt}, machine=MACHINE_LABEL)
                 jobs_service.transition(db, job, JobState.FAILED, error=comfy_resp.get("error"))
                 db.commit()
             except Exception as exc:
@@ -120,10 +122,10 @@ def generate_images(persona_id: int, body: GenerationRequest, db: Session = Depe
         db.commit()
         db.refresh(content)
         try:
-            job = jobs_service.create_job(db, job_type="image", persona_id=persona.id, content_id=content.id, payload={"prompt": full_prompt, "lora": lora, "negative_prompt": body.negative_prompt, "reference_image": ref_comfy_name, "comfy_prompt_id": comfy_resp.get("prompt_id")}, machine="mac")
+            job = jobs_service.create_job(db, job_type="image", persona_id=persona.id, content_id=content.id, payload={"prompt": full_prompt, "lora": lora, "negative_prompt": body.negative_prompt, "reference_image": ref_comfy_name, "comfy_prompt_id": comfy_resp.get("prompt_id")}, machine=MACHINE_LABEL)
             jobs_service.transition(db, job, JobState.DISPATCHING)
             jobs_service.transition(db, job, JobState.RUNNING)
-            jobs_service.record_run(db, job, prompt=full_prompt, negative_prompt=body.negative_prompt, loras=[{"name": lora, "strength": 1.0}] if lora else None, backend="comfy", machine="mac")
+            jobs_service.record_run(db, job, prompt=full_prompt, negative_prompt=body.negative_prompt, loras=[{"name": lora, "strength": 1.0}] if lora else None, backend="comfy", machine=MACHINE_LABEL)
             db.commit()
         except Exception as exc:
             logger.warning("job mirror (image queue) skipped: %s", exc)

@@ -17,6 +17,7 @@ try:
     from .scheduler import start_scheduler, stop_scheduler
     from .services import shadowwirk as sw_service
     from .workers.queue import start_worker, stop_worker
+    from .config import IS_HUB, EMPIRE_ROLE
     # ── Routers ──────────────────────────────────────────────────────
     from .api.personas import router as personas_router
     from .api.generation import router as generation_router
@@ -42,6 +43,7 @@ except ImportError:
     from scheduler import start_scheduler, stop_scheduler
     from services import shadowwirk as sw_service
     from workers.queue import start_worker, stop_worker
+    from config import IS_HUB, EMPIRE_ROLE
     from api.personas import router as personas_router
     from api.generation import router as generation_router
     from api.video import router as video_router
@@ -92,7 +94,7 @@ async def lifespan(app: FastAPI):
     sw_service.start_ping()
     start_scheduler()
     start_worker()
-    logger.info("Content scheduler + job worker started.")
+    logger.info("Empire started (role=%s).", EMPIRE_ROLE)
     yield
     stop_scheduler()
     stop_worker()
@@ -129,4 +131,5 @@ app.include_router(memory_router)
 app.include_router(agents_router)
 app.include_router(review_router)
 app.include_router(metrics_router)
-app.include_router(shadow_router)
+if IS_HUB:
+    app.include_router(shadow_router)
