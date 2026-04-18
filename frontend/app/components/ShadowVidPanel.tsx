@@ -39,6 +39,8 @@ export default function ShadowVidPanel({ personas, shadowOnline }: { personas: P
   // LoRA state
   const [videoLoras, setVideoLoras] = useState<string[]>([]);
   const [selectedLora, setSelectedLora] = useState<string>("");
+  const [personaLock, setPersonaLock] = useState(true);
+  const [identityOverrides, setIdentityOverrides] = useState("");
 
   // Video settings
   const [width, setWidth] = useState(640);
@@ -191,6 +193,8 @@ export default function ShadowVidPanel({ personas, shadowOnline }: { personas: P
       const fullPrompt = composeVideoPrompt(videoPrompt, persona?.prompt_base);
       const videoOpts = {
         full_prompt: fullPrompt,
+        persona_lock: personaLock,
+        identity_overrides: identityOverrides.trim() || undefined,
         width,
         height,
         length,
@@ -381,6 +385,29 @@ export default function ShadowVidPanel({ personas, shadowOnline }: { personas: P
             value={videoPrompt}
             onChange={(e) => setVideoPrompt(e.target.value)}
           />
+
+          {/* Identity lock + optional explicit override */}
+          <div className="bg-zinc-800/40 border border-zinc-700 rounded-lg p-3 space-y-2">
+            <label className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={personaLock}
+                onChange={(e) => setPersonaLock(e.target.checked)}
+                className="rounded border-zinc-600 bg-zinc-900 text-violet-500 focus:ring-violet-500"
+              />
+              Lock persona identity traits (hair, eyes, skin, age)
+            </label>
+            <input
+              type="text"
+              value={identityOverrides}
+              onChange={(e) => setIdentityOverrides(e.target.value)}
+              placeholder="Optional identity override for this clip (e.g. blue hair, green eyes)"
+              className="w-full p-2 bg-zinc-800 border border-zinc-700 rounded text-xs placeholder-zinc-500 focus:border-violet-500 focus:outline-none"
+            />
+            <p className="text-[11px] text-zinc-500">
+              With lock enabled, conflicting identity words in motion prompts are sanitized before generation.
+            </p>
+          </div>
 
           {/* Refine controls */}
           <div className="flex items-center gap-2">

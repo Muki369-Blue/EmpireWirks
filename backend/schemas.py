@@ -237,6 +237,8 @@ class CaptionOut(BaseModel):
 class VideoGenerationRequest(BaseModel):
     prompt_extra: str
     full_prompt: Optional[str] = None  # pre-composed prompt from remote Mac (skips persona lookup)
+    persona_lock: bool = True  # lock core persona traits when composing prompt
+    identity_overrides: Optional[str] = None  # optional explicit trait override text
     negative_prompt: Optional[str] = None
     width: int = 832
     height: int = 480

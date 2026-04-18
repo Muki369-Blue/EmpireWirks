@@ -102,6 +102,76 @@ def _compose_video_prompt(prompt_extra: str, prompt_base: Optional[str]) -> str:
     return context or motion
 
 
+_TRAIT_COLORS = [
+    "black", "brown", "blonde", "blond", "red", "auburn", "ginger", "white", "silver",
+    "gray", "grey", "blue", "green", "pink", "purple", "hazel", "amber", "golden",
+]
+_TRAIT_SKIN_TONES = [
+    "fair", "pale", "light", "olive", "tan", "caramel", "bronze", "brown", "dark",
+    "ebony", "porcelain", "golden-brown", "golden brown",
+]
+
+
+def _extract_color_trait(prompt_base: str, noun: str) -> Optional[str]:
+    for color in _TRAIT_COLORS:
+        if re.search(rf"\b{re.escape(color)}\s+{noun}\b", prompt_base, re.I):
+            return color
+    return None
+
+
+def _extract_skin_tone(prompt_base: str) -> Optional[str]:
+    for tone in _TRAIT_SKIN_TONES:
+        if re.search(rf"\b{re.escape(tone)}\s+skin\b", prompt_base, re.I):
+            return tone
+    return None
+
+
+def _extract_age(prompt_base: str) -> Optional[str]:
+    match = re.search(r"\b(\d{2})\s*years\s*old\b", prompt_base, re.I)
+    return match.group(1) if match else None
+
+
+def _sanitize_motion_prompt(prompt_extra: str, prompt_base: Optional[str]) -> str:
+    """Remove contradictory identity traits from motion text when persona lock is enabled."""
+    motion = (prompt_extra or "").strip()
+    if not motion or not prompt_base:
+        return motion
+
+    persona_hair = _extract_color_trait(prompt_base, "hair")
+    persona_eyes = _extract_color_trait(prompt_base, "eyes")
+    persona_skin = _extract_skin_tone(prompt_base)
+    persona_age = _extract_age(prompt_base)
+
+    cleaned = motion
+
+    if persona_hair:
+        for color in _TRAIT_COLORS:
+            if color == persona_hair:
+                continue
+            cleaned = re.sub(rf"\b{re.escape(color)}\s+hair\b", "hair", cleaned, flags=re.I)
+
+    if persona_eyes:
+        for color in _TRAIT_COLORS:
+            if color == persona_eyes:
+                continue
+            cleaned = re.sub(rf"\b{re.escape(color)}\s+eyes\b", "eyes", cleaned, flags=re.I)
+
+    if persona_skin:
+        for tone in _TRAIT_SKIN_TONES:
+            if tone == persona_skin:
+                continue
+            cleaned = re.sub(rf"\b{re.escape(tone)}\s+skin\b", "skin", cleaned, flags=re.I)
+
+    if persona_age:
+        def _age_sub(match: re.Match) -> str:
+            age = match.group(1)
+            return match.group(0) if age == persona_age else ""
+
+        cleaned = re.sub(r"\b(\d{2})\s*years\s*old\b", _age_sub, cleaned, flags=re.I)
+
+    return re.sub(r"\s+", " ", cleaned).strip(" ,")
+
+
 def _lookup_local_persona_by_name(name: Optional[str], db: Session) -> Optional[Persona]:
     if not name:
         return None
@@ -197,15 +267,24 @@ def generate_video(body: VideoGenerationRequest, persona_id: int = 0, db: Sessio
     if not comfy_api.is_comfy_running():
         raise HTTPException(status_code=503, detail="ComfyUI is not running. Start it first.")
 
-    if body.full_prompt:
-        full_prompt = body.full_prompt
-    elif persona_id:
+    persona = None
+    if persona_id:
         persona = db.query(Persona).filter(Persona.id == persona_id).first()
         if not persona:
             raise HTTPException(status_code=404, detail="Persona not found")
+
+    if persona and body.persona_lock:
+        sanitized_motion = _sanitize_motion_prompt(body.prompt_extra, persona.prompt_base)
+        full_prompt = _compose_video_prompt(sanitized_motion, persona.prompt_base)
+    elif body.full_prompt:
+        full_prompt = body.full_prompt
+    elif persona:
         full_prompt = _compose_video_prompt(body.prompt_extra, persona.prompt_base)
     else:
         full_prompt = body.prompt_extra
+
+    if body.identity_overrides and body.identity_overrides.strip():
+        full_prompt = f"{full_prompt} {body.identity_overrides.strip()}".strip()
 
     result = comfy_api.queue_video(
         positive_prompt=full_prompt,

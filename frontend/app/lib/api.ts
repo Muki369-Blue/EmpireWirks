@@ -453,6 +453,8 @@ export async function generateVideo(
   promptExtra: string,
   opts?: {
     full_prompt?: string;
+    persona_lock?: boolean;
+    identity_overrides?: string;
     negative_prompt?: string;
     width?: number;
     height?: number;
@@ -470,6 +472,8 @@ export async function generateVideo(
     body: JSON.stringify({
       prompt_extra: promptExtra,
       full_prompt: opts?.full_prompt || null,
+      persona_lock: opts?.persona_lock ?? true,
+      identity_overrides: opts?.identity_overrides || null,
       negative_prompt: opts?.negative_prompt || null,
       width: opts?.width ?? 640,
       height: opts?.height ?? 384,
@@ -513,6 +517,8 @@ export async function generateVideoRemote(
   promptExtra: string,
   opts?: {
     full_prompt?: string;
+    persona_lock?: boolean;
+    identity_overrides?: string;
     negative_prompt?: string;
     width?: number;
     height?: number;
@@ -530,6 +536,8 @@ export async function generateVideoRemote(
     body: JSON.stringify({
       prompt_extra: promptExtra,
       full_prompt: opts?.full_prompt || null,
+      persona_lock: opts?.persona_lock ?? true,
+      identity_overrides: opts?.identity_overrides || null,
       negative_prompt: opts?.negative_prompt || null,
       width: opts?.width ?? 640,
       height: opts?.height ?? 384,
