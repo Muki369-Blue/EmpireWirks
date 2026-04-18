@@ -21,14 +21,14 @@ try:
     from .. import comfy_api
     from ..postprocess import process_completed_image, check_upscale_status
     from ..services import jobs as jobs_service
-    from ..config import MACHINE_LABEL
+    from ..config import MACHINE_LABEL, AUTO_UNLOAD_AFTER_T2I
 except ImportError:
     from database import get_db, Persona, Content, JobState
     from schemas import GenerationRequest, GenerationOut
     import comfy_api
     from postprocess import process_completed_image, check_upscale_status
     from services import jobs as jobs_service
-    from config import MACHINE_LABEL
+    from config import MACHINE_LABEL, AUTO_UNLOAD_AFTER_T2I
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +176,7 @@ def list_generations(db: Session = Depends(get_db)):
             check_upscale_status(content.id)
             db.refresh(content)
 
-    if any_just_completed:
+    if any_just_completed and AUTO_UNLOAD_AFTER_T2I:
         still_generating = db.query(Content).filter(Content.status == "generating").count() > 0
         if not still_generating:
             threading.Thread(target=_deferred_memory_cleanup, daemon=True).start()

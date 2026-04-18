@@ -6,6 +6,13 @@ Single env var controls Mac-vs-Shadow behaviour:
 """
 import os
 
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
 EMPIRE_ROLE: str = os.environ.get("EMPIRE_ROLE", "hub").lower()
 IS_HUB: bool = EMPIRE_ROLE == "hub"
 IS_SHADOW: bool = EMPIRE_ROLE == "shadow"
@@ -18,3 +25,8 @@ SHADOW_URL: str = os.environ.get("SHADOW_WIRKS_URL", "http://100.119.54.18:8800"
 
 # Label stamped on generation jobs so we know which machine produced them
 MACHINE_LABEL: str = "mac" if IS_HUB else "shadow"
+
+# Auto memory/model unload after T2I completion.
+# Default: disabled on Mac hub to avoid cold-start reload penalties;
+# enabled on shadow worker where memory pressure is usually higher.
+AUTO_UNLOAD_AFTER_T2I: bool = _env_bool("AUTO_UNLOAD_AFTER_T2I", default=not IS_HUB)

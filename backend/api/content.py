@@ -15,10 +15,12 @@ try:
     from ..database import get_db, Persona, Content, ContentSet
     from ..schemas import CaptionRequest, CaptionOut, ContentSetCreate, ContentSetOut
     from .. import comfy_api
+    from ..config import AUTO_UNLOAD_AFTER_T2I
 except ImportError:
     from database import get_db, Persona, Content, ContentSet
     from schemas import CaptionRequest, CaptionOut, ContentSetCreate, ContentSetOut
     import comfy_api
+    from config import AUTO_UNLOAD_AFTER_T2I
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +163,8 @@ def list_content_sets(db: Session = Depends(get_db)):
             if all(c.status in ("completed", "failed") for c in items):
                 cs.status = "completed" if any(c.status == "completed" for c in items) else "failed"
                 db.commit()
-                threading.Thread(target=_deferred_memory_cleanup, daemon=True).start()
+                if AUTO_UNLOAD_AFTER_T2I:
+                    threading.Thread(target=_deferred_memory_cleanup, daemon=True).start()
     return sets
 
 
