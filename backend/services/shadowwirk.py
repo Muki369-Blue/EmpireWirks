@@ -60,11 +60,34 @@ def start_ping():
 
 # ── remote helpers ──────────────────────────────────────────────────
 
-def fetch_video_status(remote_content_id: int) -> dict[str, Any]:
-    """GET /video-status/<id> on Shadow-Wirk."""
-    resp = requests.get(f"{SHADOW_URL}/video-status/{remote_content_id}", timeout=15)
+def _get_json(path: str, timeout: int = 15) -> dict[str, Any]:
+    resp = requests.get(f"{SHADOW_URL}{path}", timeout=timeout)
     resp.raise_for_status()
     return resp.json()
+
+
+def fetch_generation_status(remote_content_id: int) -> dict[str, Any]:
+    """GET /generations/<id>/status on Shadow-Wirk."""
+    return _get_json(f"/generations/{remote_content_id}/status")
+
+def fetch_video_status(remote_content_id: int) -> dict[str, Any]:
+    """GET video status on Shadow-Wirk with fallback for flaky /video-status responses."""
+    primary_error: Optional[Exception] = None
+    try:
+        return _get_json(f"/video-status/{remote_content_id}")
+    except Exception as exc:
+        primary_error = exc
+        logger.warning("Shadow-Wirk /video-status/%s failed, falling back to /generations/%s/status: %s", remote_content_id, remote_content_id, exc)
+
+    try:
+        status_data = fetch_generation_status(remote_content_id)
+        status_data.setdefault("outputs", [])
+        status_data.setdefault("progress", 0)
+        return status_data
+    except Exception:
+        if primary_error:
+            raise primary_error
+        raise
 
 
 def download_video_bytes(filename: str, subfolder: str = "Empire") -> bytes:

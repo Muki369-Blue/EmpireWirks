@@ -402,9 +402,7 @@ def get_video_status(content_id: int, db: Session = Depends(get_db)):
 @router.post("/sync-remote-video/{remote_content_id}")
 def sync_remote_video(remote_content_id: int, db: Session = Depends(get_db)):
     try:
-        status_resp = requests.get(f"{SHADOW_URL}/video-status/{remote_content_id}", timeout=15)
-        status_resp.raise_for_status()
-        status_data = status_resp.json()
+        status_data = sw_service.fetch_video_status(remote_content_id)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to reach Shadow-Wirk: {e}")
 
@@ -421,18 +419,16 @@ def sync_remote_video(remote_content_id: int, db: Session = Depends(get_db)):
     remote_prompt = None
     local_persona = None
     try:
-        content_resp = requests.get(f"{SHADOW_URL}/vault/", timeout=15)
-        if content_resp.ok:
-            vault_items = content_resp.json()
-            for item in vault_items:
-                if item.get("id") == remote_content_id:
-                    remote_persona_id = item.get("persona_id")
-                    remote_prompt = item.get("prompt_used")
-                    break
+        vault_items = sw_service.fetch_remote_vault()
+        for item in vault_items:
+            if item.get("id") == remote_content_id:
+                remote_persona_id = item.get("persona_id")
+                remote_prompt = item.get("prompt_used")
+                break
         if remote_persona_id:
-            persona_resp = requests.get(f"{SHADOW_URL}/personas/{remote_persona_id}", timeout=15)
-            if persona_resp.ok:
-                remote_persona_name = persona_resp.json().get("name")
+            persona_data = sw_service.fetch_remote_persona(remote_persona_id)
+            if persona_data:
+                remote_persona_name = persona_data.get("name")
         local_persona = _lookup_local_persona_by_prompt(remote_prompt, db)
         if not local_persona:
             local_persona = _lookup_local_persona_by_name(remote_persona_name, db)
@@ -444,9 +440,7 @@ def sync_remote_video(remote_content_id: int, db: Session = Depends(get_db)):
         pass
 
     try:
-        video_resp = requests.get(f"{SHADOW_URL}/images/{filename}", params={"subfolder": subfolder}, timeout=120)
-        video_resp.raise_for_status()
-        video_bytes = video_resp.content
+        video_bytes = sw_service.download_video_bytes(filename, subfolder=subfolder)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to download video from Shadow-Wirk: {e}")
 
