@@ -31,7 +31,7 @@ timeout /t 3 /nobreak >nul
 
 :: Start Backend (FastAPI on 0.0.0.0:8800 — accessible via Tailscale + LAN)
 echo Starting Backend (FastAPI :8800, role=shadow)...
-start "WinEmpire - Backend :8800" cmd /k "cd /d "%~dp0" && .venv\Scripts\activate.bat && set EMPIRE_ROLE=shadow && set COMFY_PORT=8188 && python -m uvicorn backend.main:app --host 0.0.0.0 --port 8800 --reload"
+start "WinEmpire - Backend :8800" cmd /k "cd /d "%~dp0" && .venv\Scripts\activate.bat && set EMPIRE_ROLE=shadow && python -m uvicorn backend.main:app --host 0.0.0.0 --port 8800 --reload"
 
 timeout /t 2 /nobreak >nul
 
