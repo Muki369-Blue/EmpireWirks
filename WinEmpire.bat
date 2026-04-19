@@ -9,7 +9,7 @@ echo  ========================================
 echo   Role     : Shadow (EMPIRE_ROLE=shadow)
 echo   Backend  :8800  (LAN + Tailscale)
 echo   Frontend :3000  (local dev)
-echo   ComfyUI  :8188  (local only)
+echo   ComfyUI  :8000  (local only)
 echo  ----------------------------------------
 echo   Quick Connect to Mac:
 echo     Tailscale : http://100.119.54.18:8800
