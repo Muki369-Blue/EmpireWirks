@@ -19,6 +19,12 @@ OLLAMA_MODEL = os.environ.get(
     "OLLAMA_MODEL",
     "empire-qwen2.5-14b",
 )
+# Dedicated uncensored model for image/video prompt refinement.
+# Mistral Nemo 12B Celeste — fine-tuned for creative, unrestricted generation.
+REFINE_MODEL = os.environ.get(
+    "REFINE_MODEL",
+    "vanilj/mistral-nemo-12b-celeste-v1.9:Q3_K_M",
+)
 
 # ── shared prompt templates ─────────────────────────────────────────
 
@@ -150,8 +156,8 @@ def refine_prompt(
     refined = _chat([
         {"role": "system", "content": REFINE_SYSTEM},
         {"role": "user", "content": user_content},
-    ])
-    return {"original": prompt, "refined": _strip_quotes(refined), "model": OLLAMA_MODEL}
+    ], model=REFINE_MODEL, num_predict=400)
+    return {"original": prompt, "refined": _strip_quotes(refined), "model": REFINE_MODEL}
 
 
 def refine_video_prompt(
@@ -172,8 +178,8 @@ def refine_video_prompt(
     refined = _chat([
         {"role": "system", "content": VIDEO_REFINE_SYSTEM},
         {"role": "user", "content": user_content},
-    ])
-    return {"original": prompt, "refined": _strip_quotes(refined), "model": OLLAMA_MODEL}
+    ], model=REFINE_MODEL, num_predict=400)
+    return {"original": prompt, "refined": _strip_quotes(refined), "model": REFINE_MODEL}
 
 
 def generate_caption(

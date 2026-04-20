@@ -16,10 +16,20 @@ const VERDICT_COLORS: Record<string, string> = {
   auto_reject: "text-red-400",
 };
 
+function getModelTag(tags?: string | null): string | null {
+  if (!tags) return null;
+  const parts = tags.split(",").map((t) => t.trim()).filter(Boolean);
+  const model = parts.find((t) => t.startsWith("model:"));
+  return model ? model.replace("model:", "") : null;
+}
+
 export default function ReviewInboxPanel({ personas }: { personas: Persona[] }) {
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState("");
+  const [modelFilter, setModelFilter] = useState<"all" | "a" | "b">(
+    () => (typeof window !== "undefined" ? (localStorage.getItem("review_modelFilter") as "all" | "a" | "b" | null) ?? "all" : "all")
+  );
   const [selected, setSelected] = useState<ReviewItem | null>(null);
   const [notes, setNotes] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
@@ -42,6 +52,24 @@ export default function ReviewInboxPanel({ personas }: { personas: Persona[] }) 
 
   const personaName = (pid: number | null) =>
     personas.find((p) => p.id === pid)?.name ?? "Unknown";
+
+  const visibleItems = items.filter((item) => {
+    if (modelFilter === "all") return true;
+    const model = getModelTag(item.content.tags);
+    if (modelFilter === "a") return model === "flux_schnell";
+    if (modelFilter === "b") return model === "flux2_klein";
+    return true;
+  });
+
+  useEffect(() => {
+    localStorage.setItem("review_modelFilter", modelFilter);
+  }, [modelFilter]);
+
+  useEffect(() => {
+    if (selected && !visibleItems.some((i) => i.content.id === selected.content.id)) {
+      setSelected(null);
+    }
+  }, [modelFilter, visibleItems, selected]);
 
   async function handleScore(contentId: number) {
     setActionLoading(true);
@@ -94,8 +122,40 @@ export default function ReviewInboxPanel({ personas }: { personas: Persona[] }) 
           <option value="auto_approve">Auto-Approved</option>
           <option value="auto_reject">Auto-Rejected</option>
         </select>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setModelFilter("all")}
+            className={`text-xs px-2 py-1 rounded border ${
+              modelFilter === "all"
+                ? "border-amber-500 bg-amber-600/20 text-amber-300"
+                : "border-white/10 bg-white/5 text-gray-400"
+            }`}
+          >
+            All
+          </button>
+          <button
+            onClick={() => setModelFilter("a")}
+            className={`text-xs px-2 py-1 rounded border ${
+              modelFilter === "a"
+                ? "border-amber-500 bg-amber-600/20 text-amber-300"
+                : "border-white/10 bg-white/5 text-gray-400"
+            }`}
+          >
+            A
+          </button>
+          <button
+            onClick={() => setModelFilter("b")}
+            className={`text-xs px-2 py-1 rounded border ${
+              modelFilter === "b"
+                ? "border-amber-500 bg-amber-600/20 text-amber-300"
+                : "border-white/10 bg-white/5 text-gray-400"
+            }`}
+          >
+            B
+          </button>
+        </div>
         <div className="flex-1" />
-        <span className="text-gray-400 text-sm">{items.length} items</span>
+        <span className="text-gray-400 text-sm">{visibleItems.length} items</span>
         <button onClick={refresh} className="text-sm text-blue-400 hover:underline">
           {loading ? "Loading…" : "Refresh"}
         </button>
@@ -105,10 +165,10 @@ export default function ReviewInboxPanel({ personas }: { personas: Persona[] }) 
       <div className="grid grid-cols-3 gap-3">
         {/* Item list */}
         <div className="col-span-1 space-y-2 max-h-[65vh] overflow-y-auto">
-          {items.length === 0 && (
+          {visibleItems.length === 0 && (
             <p className="text-gray-500 text-sm text-center py-8">All clear — nothing to review!</p>
           )}
-          {items.map((item) => (
+          {visibleItems.map((item) => (
             <div
               key={item.content.id}
               onClick={() => setSelected(item)}
@@ -129,6 +189,11 @@ export default function ReviewInboxPanel({ personas }: { personas: Persona[] }) 
               )}
               <div className="flex items-center gap-2">
                 <span className="text-gray-300 text-xs">#{item.content.id}</span>
+                {getModelTag(item.content.tags) && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-600/30 text-amber-300" title={`Model: ${getModelTag(item.content.tags)}`}>
+                    {getModelTag(item.content.tags) === "flux_schnell" ? "A" : getModelTag(item.content.tags) === "flux2_klein" ? "B" : getModelTag(item.content.tags)?.replace(/_/g, " ")}
+                  </span>
+                )}
                 {item.score && (
                   <span className={`text-xs font-medium ${VERDICT_COLORS[item.score.verdict] ?? "text-gray-400"}`}>
                     {item.score.verdict.replace("_", " ")} ({Math.round(item.score.overall * 100)}%)
@@ -168,6 +233,12 @@ export default function ReviewInboxPanel({ personas }: { personas: Persona[] }) 
                   <strong className="text-white">Persona:</strong>{" "}
                   {personaName(selected.content.persona_id)}
                 </div>
+                {getModelTag(selected.content.tags) && (
+                  <div className="text-gray-400 mt-1">
+                    <strong className="text-white">Model:</strong>{" "}
+                    {getModelTag(selected.content.tags)?.replace(/_/g, " ")}
+                  </div>
+                )}
                 {selected.content.prompt_used && (
                   <div className="text-gray-400 mt-1">
                     <strong className="text-white">Prompt:</strong>{" "}

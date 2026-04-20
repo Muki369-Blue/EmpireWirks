@@ -31,6 +31,9 @@ class GenerationRequest(BaseModel):
     batch_size: int = 1
     negative_prompt: Optional[str] = None
     lora_override: Optional[str] = None
+    image_model_profile: Optional[str] = None  # e.g. flux_schnell | flux2_klein
+    lora_strength_model: float = 0.85
+    lora_strength_clip: float = 0.85
 
 
 class GenerationOut(BaseModel):

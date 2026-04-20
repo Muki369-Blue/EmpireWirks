@@ -9,3 +9,5 @@ Pillow
 numpy
 websocket-client
 alembic==1.18.4
+mlx-lm
+httpx==0.27.2

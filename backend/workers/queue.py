@@ -145,6 +145,8 @@ def _run_generation_job(db, job: GenerationJob):
     from pathlib import Path
 
     payload = job.payload or {}
+    image_model_profile = (payload.get("model_profile") or "flux_schnell").lower()
+    image_model_tag = f"model:{image_model_profile}"
     persona = db.query(Persona).filter(Persona.id == job.persona_id).first() if job.persona_id else None
 
     jobs_service.transition(db, job, JobState.RUNNING, actor="worker")
@@ -167,11 +169,17 @@ def _run_generation_job(db, job: GenerationJob):
         ref_comfy_name = None
         if persona and persona.reference_image and Path(persona.reference_image).exists():
             ref_comfy_name = comfy_api.upload_image_to_comfyui(persona.reference_image)
+        model_profile = image_model_profile
+        lora_strength_model = float(payload.get("lora_strength_model", 0.85))
+        lora_strength_clip = float(payload.get("lora_strength_clip", 0.85))
         comfy_resp = comfy_api.queue_prompt(
             positive_prompt=payload.get("prompt", ""),
             lora_name=payload.get("lora") or (persona.lora_name if persona else None),
             reference_image=ref_comfy_name,
             negative_prompt=payload.get("negative_prompt"),
+            model_profile=model_profile,
+            lora_strength_model=lora_strength_model,
+            lora_strength_clip=lora_strength_clip,
         )
 
     if "error" in comfy_resp:
@@ -189,7 +197,7 @@ def _run_generation_job(db, job: GenerationJob):
             prompt_used=payload.get("prompt", ""),
             comfy_job_id=prompt_id,
             status="generating" if job.job_type == "image" else "processing",
-            tags="video" if job.job_type == "video" else None,
+            tags="video" if job.job_type == "video" else f"image,{image_model_tag}",
         )
         db.add(content)
         db.commit()
@@ -198,15 +206,20 @@ def _run_generation_job(db, job: GenerationJob):
     else:
         content.comfy_job_id = prompt_id
         content.status = "generating" if job.job_type == "image" else "processing"
+        if job.job_type == "image":
+            existing_tags = content.tags or ""
+            if image_model_tag not in existing_tags:
+                content.tags = f"{existing_tags},{image_model_tag}".strip(",")
     db.commit()
 
     jobs_service.record_run(
         db, job,
         prompt=payload.get("prompt"),
         negative_prompt=payload.get("negative_prompt"),
-        loras=[{"name": payload.get("lora"), "strength": 1.0}] if payload.get("lora") else None,
+        loras=[{"name": payload.get("lora"), "strength": float(payload.get("lora_strength_model", 0.85))}] if payload.get("lora") else None,
         backend="comfy",
         machine=MACHINE_LABEL,
+        model=(payload.get("model_profile") or ("wan-2.1" if job.job_type == "video" else "flux_schnell")),
     )
     db.commit()
 
@@ -263,7 +276,7 @@ def _run_generation_job(db, job: GenerationJob):
                 job_type=job.job_type,
                 duration_seconds=float(waited),
                 estimated_cost_usd=0.0,
-                model_used="flux-schnell" if job.job_type == "image" else "wan-2.1",
+                model_used=(payload.get("model_profile") or "flux_schnell") if job.job_type == "image" else "wan-2.1",
             )
             db.add(cost)
             db.commit()

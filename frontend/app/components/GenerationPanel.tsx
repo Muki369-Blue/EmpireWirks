@@ -7,12 +7,14 @@ import {
   fetchScenePresets,
   fetchNegativePromptPresets,
   fetchLoras,
+  fetchImageModelProfiles,
   refinePrompt,
   type Persona,
   type ScenePreset,
   type NegativePromptPreset,
   type InstalledLora,
   type RecommendedLora,
+  type ImageModelProfile,
 } from "../lib/api";
 
 interface Props {
@@ -40,9 +42,12 @@ export default function GenerationPanel({ personas, onGenerated }: Props) {
   const [installedLoras, setInstalledLoras] = useState<InstalledLora[]>([]);
   const [recommendedLoras, setRecommendedLoras] = useState<RecommendedLora[]>([]);
   const [selectedLora, setSelectedLora] = useState<string>("");
+  const [imageProfiles, setImageProfiles] = useState<ImageModelProfile[]>([]);
+  const [selectedImageProfile, setSelectedImageProfile] = useState<string>("flux_schnell");
   const [showLoras, setShowLoras] = useState(false);
   const [showPresets, setShowPresets] = useState(false);
   const [showRefiner, setShowRefiner] = useState(false);
+  const [abRunning, setAbRunning] = useState(false);
   const [stopping, setStopping] = useState(false);
 
   useEffect(() => {
@@ -55,6 +60,12 @@ export default function GenerationPanel({ personas, onGenerated }: Props) {
     fetchLoras().then((data) => {
       setInstalledLoras(data.installed);
       setRecommendedLoras(data.recommended);
+    });
+    fetchImageModelProfiles().then((profiles) => {
+      setImageProfiles(profiles);
+      if (profiles.length > 0 && !profiles.some((p) => p.id === selectedImageProfile)) {
+        setSelectedImageProfile(profiles[0].id);
+      }
     });
   }, []);
 
@@ -91,17 +102,61 @@ export default function GenerationPanel({ personas, onGenerated }: Props) {
         batchSize,
         negativePrompt.trim() || undefined,
         selectedLora || undefined,
+        selectedImageProfile || undefined,
       );
       const failed = jobs.filter((j) => j.status === "failed").length;
       const queued = jobs.filter((j) => j.status === "generating").length;
+      const profileLabel = selectedImageProfile.replace(/_/g, " ");
       setResult(
-        `Queued ${queued} job(s)${failed ? `, ${failed} failed (is ComfyUI running?)` : ""}`
+        `Queued ${queued} job(s) on ${profileLabel}${failed ? `, ${failed} failed (is ComfyUI running?)` : ""}`
       );
       onGenerated();
     } catch {
       setResult("Error: Could not reach backend");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleGenerateAB = async () => {
+    if (!selectedId || !promptExtra.trim()) return;
+
+    setAbRunning(true);
+    setResult(null);
+    try {
+      const profileA = "flux_schnell";
+      const profileB = "flux2_klein";
+
+      const jobsA = await triggerGeneration(
+        selectedId,
+        promptExtra.trim(),
+        batchSize,
+        negativePrompt.trim() || undefined,
+        selectedLora || undefined,
+        profileA,
+      );
+      const jobsB = await triggerGeneration(
+        selectedId,
+        promptExtra.trim(),
+        batchSize,
+        negativePrompt.trim() || undefined,
+        selectedLora || undefined,
+        profileB,
+      );
+
+      const queuedA = jobsA.filter((j) => j.status === "generating").length;
+      const queuedB = jobsB.filter((j) => j.status === "generating").length;
+      const failedA = jobsA.filter((j) => j.status === "failed").length;
+      const failedB = jobsB.filter((j) => j.status === "failed").length;
+
+      setResult(
+        `A/B queued: A(${profileA})=${queuedA}, B(${profileB})=${queuedB}${failedA + failedB > 0 ? `, failed=${failedA + failedB}` : ""}`
+      );
+      onGenerated();
+    } catch {
+      setResult("Error: Could not queue A/B test")
+    } finally {
+      setAbRunning(false);
     }
   };
 
@@ -309,6 +364,69 @@ export default function GenerationPanel({ personas, onGenerated }: Props) {
 
           {/* ── LoRA Models Section ── */}
           <div className="border border-zinc-800 rounded-xl overflow-hidden">
+            <div className="p-3 bg-zinc-800/40 border-b border-zinc-800">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm flex items-center gap-2">
+                  <span>🧪</span> Image Model Profile
+                </span>
+                <span className="text-[10px] text-amber-300 bg-amber-900/30 px-1.5 py-0.5 rounded">
+                  A/B Quick Test
+                </span>
+              </div>
+            </div>
+            <div className="p-3 space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedImageProfile("flux_schnell")}
+                  className={`px-2.5 py-2 rounded-lg border text-xs font-medium transition-colors ${
+                    selectedImageProfile === "flux_schnell"
+                      ? "border-amber-500 bg-amber-600/20 text-amber-300"
+                      : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600"
+                  }`}
+                >
+                  A: Flux Schnell
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedImageProfile("flux2_klein")}
+                  className={`px-2.5 py-2 rounded-lg border text-xs font-medium transition-colors ${
+                    selectedImageProfile === "flux2_klein"
+                      ? "border-amber-500 bg-amber-600/20 text-amber-300"
+                      : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600"
+                  }`}
+                >
+                  B: Flux2 Klein
+                </button>
+              </div>
+
+              <select
+                value={selectedImageProfile}
+                onChange={(e) => setSelectedImageProfile(e.target.value)}
+                className="w-full p-2.5 bg-zinc-800 border border-zinc-700 rounded-lg text-sm focus:border-amber-500 focus:outline-none"
+              >
+                {(imageProfiles.length > 0
+                  ? imageProfiles
+                  : [
+                      { id: "flux_schnell", unet_name: "flux1-schnell.safetensors", vae_name: "ae.safetensors", default_steps: 4, default_guidance: 3.5 },
+                      { id: "flux2_klein", unet_name: "Flux2-Klein-9B-True-v2-bf16.safetensors", vae_name: "ae.safetensors", default_steps: 6, default_guidance: 3.5 },
+                    ]
+                ).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.id.replace(/_/g, " ")}
+                  </option>
+                ))}
+              </select>
+
+              {imageProfiles.find((p) => p.id === selectedImageProfile) && (
+                <p className="text-[11px] text-zinc-500">
+                  UNET: {imageProfiles.find((p) => p.id === selectedImageProfile)?.unet_name} | Steps: {imageProfiles.find((p) => p.id === selectedImageProfile)?.default_steps}
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="border border-zinc-800 rounded-xl overflow-hidden">
             <button
               onClick={() => setShowLoras(!showLoras)}
               className="w-full flex items-center justify-between p-3 bg-zinc-800/40 hover:bg-zinc-800/60 transition-colors text-sm"
@@ -415,14 +533,21 @@ export default function GenerationPanel({ personas, onGenerated }: Props) {
           <div className="flex gap-2">
             <button
               onClick={handleGenerate}
-              disabled={loading || stopping || !selectedId || !promptExtra.trim()}
+              disabled={loading || abRunning || stopping || !selectedId || !promptExtra.trim()}
               className="flex-1 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 disabled:opacity-40 px-4 py-2.5 rounded-lg font-semibold text-sm transition-all"
             >
-              {loading ? "Sending to Flux..." : "Generate"}
+              {loading ? `Sending to ${selectedImageProfile.replace(/_/g, " ")}...` : "Generate"}
+            </button>
+            <button
+              onClick={handleGenerateAB}
+              disabled={loading || abRunning || stopping || !selectedId || !promptExtra.trim()}
+              className="bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-700 hover:to-yellow-700 disabled:opacity-40 px-4 py-2.5 rounded-lg font-semibold text-sm transition-all"
+            >
+              {abRunning ? "Queueing A/B..." : "Run A/B"}
             </button>
             <button
               onClick={handleStop}
-              disabled={stopping}
+              disabled={stopping || loading || abRunning}
               className="bg-red-600 hover:bg-red-700 disabled:opacity-40 px-4 py-2.5 rounded-lg font-semibold text-sm transition-all flex items-center gap-1.5"
             >
               {stopping ? (

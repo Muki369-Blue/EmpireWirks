@@ -5,12 +5,17 @@ All /shadow/* routes forward to the Shadow-Wirk backend via server-side requests
 """
 from __future__ import annotations
 
+import io
 import logging
+import os
+import subprocess
+import tempfile
 from typing import Optional
 
 import requests
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query
 from fastapi.responses import Response
+from PIL import Image
 
 try:
     from ..services import shadowwirk as sw_service
@@ -170,3 +175,103 @@ def shadow_download_proxy(filename: str, subfolder: str = Query("Empire")):
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to download: {e}")
+
+
+@router.get("/download-mp4/{filename:path}")
+def shadow_download_mp4(filename: str, subfolder: str = Query("Empire")):
+    """Download a Shadow-Wirk output as MP4 without interrupting active generations."""
+    try:
+        resp = requests.get(
+            f"{SHADOW_URL}/download/{filename}",
+            params={"subfolder": subfolder},
+            timeout=180,
+        )
+        resp.raise_for_status()
+        source_bytes = resp.content
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch source file: {e}")
+
+    safe_name = os.path.basename(filename)
+    stem, ext = os.path.splitext(safe_name)
+    ext = ext.lower()
+
+    if ext == ".mp4":
+        return Response(
+            content=source_bytes,
+            media_type="video/mp4",
+            headers={
+                "Content-Disposition": f'attachment; filename="{stem}.mp4"',
+                "Cache-Control": "public, max-age=3600",
+            },
+        )
+
+    tmp_mp4 = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+    tmp_mp4.close()
+    try:
+        img = Image.open(io.BytesIO(source_bytes))
+        n_frames = getattr(img, "n_frames", 1)
+        width, height = img.size
+        width = width if width % 2 == 0 else width + 1
+        height = height if height % 2 == 0 else height + 1
+        duration_ms = img.info.get("duration", 100)
+        fps = max(1, round(1000 / duration_ms)) if duration_ms else 16
+
+        proc = subprocess.Popen(
+            [
+                "ffmpeg",
+                "-y",
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "rgb24",
+                "-s",
+                f"{width}x{height}",
+                "-r",
+                str(fps),
+                "-i",
+                "pipe:0",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-movflags",
+                "+faststart",
+                tmp_mp4.name,
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        for frame_index in range(n_frames):
+            img.seek(frame_index)
+            frame = img.convert("RGB").resize((width, height))
+            if proc.stdin is not None:
+                proc.stdin.write(frame.tobytes())
+
+        if proc.stdin is not None:
+            proc.stdin.close()
+        proc.wait(timeout=90)
+
+        if proc.returncode != 0:
+            stderr = proc.stderr.read().decode(errors="replace")[:500] if proc.stderr else ""
+            raise HTTPException(status_code=500, detail=f"MP4 conversion failed: {stderr}")
+
+        mp4_bytes = Path(tmp_mp4.name).read_bytes()
+        return Response(
+            content=mp4_bytes,
+            media_type="video/mp4",
+            headers={
+                "Content-Disposition": f'attachment; filename="{stem}.mp4"',
+                "Cache-Control": "public, max-age=3600",
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Conversion failed: {e}")
+    finally:
+        try:
+            os.unlink(tmp_mp4.name)
+        except Exception:
+            pass

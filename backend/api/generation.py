@@ -93,6 +93,8 @@ def generate_images(persona_id: int, body: GenerationRequest, db: Session = Depe
 
     full_prompt = f"{persona.prompt_base}, {body.prompt_extra}"
     lora = body.lora_override or persona.lora_name
+    model_profile = (body.image_model_profile or "flux_schnell").lower()
+    model_tag = f"model:{model_profile}"
     results = []
 
     ref_comfy_name = None
@@ -100,15 +102,42 @@ def generate_images(persona_id: int, body: GenerationRequest, db: Session = Depe
         ref_comfy_name = comfy_api.upload_image_to_comfyui(persona.reference_image)
 
     for _ in range(body.batch_size):
-        comfy_resp = comfy_api.queue_prompt(full_prompt, lora, reference_image=ref_comfy_name, negative_prompt=body.negative_prompt)
+        comfy_resp = comfy_api.queue_prompt(
+            full_prompt,
+            lora,
+            reference_image=ref_comfy_name,
+            negative_prompt=body.negative_prompt,
+            model_profile=model_profile,
+            lora_strength_model=body.lora_strength_model,
+            lora_strength_clip=body.lora_strength_clip,
+        )
 
         if "error" in comfy_resp:
-            content = Content(persona_id=persona.id, prompt_used=full_prompt, status="failed")
+            content = Content(
+                persona_id=persona.id,
+                prompt_used=full_prompt,
+                status="failed",
+                tags=f"image,{model_tag}",
+            )
             db.add(content)
             db.commit()
             db.refresh(content)
             try:
-                job = jobs_service.create_job(db, job_type="image", persona_id=persona.id, content_id=content.id, payload={"prompt": full_prompt, "lora": lora, "negative_prompt": body.negative_prompt}, machine=MACHINE_LABEL)
+                job = jobs_service.create_job(
+                    db,
+                    job_type="image",
+                    persona_id=persona.id,
+                    content_id=content.id,
+                    payload={
+                        "prompt": full_prompt,
+                        "lora": lora,
+                        "negative_prompt": body.negative_prompt,
+                        "model_profile": model_profile,
+                        "lora_strength_model": body.lora_strength_model,
+                        "lora_strength_clip": body.lora_strength_clip,
+                    },
+                    machine=MACHINE_LABEL,
+                )
                 jobs_service.transition(db, job, JobState.FAILED, error=comfy_resp.get("error"))
                 db.commit()
             except Exception as exc:
@@ -117,15 +146,46 @@ def generate_images(persona_id: int, body: GenerationRequest, db: Session = Depe
             results.append(content)
             continue
 
-        content = Content(persona_id=persona.id, prompt_used=full_prompt, comfy_job_id=comfy_resp.get("prompt_id"), status="generating")
+        content = Content(
+            persona_id=persona.id,
+            prompt_used=full_prompt,
+            comfy_job_id=comfy_resp.get("prompt_id"),
+            status="generating",
+            tags=f"image,{model_tag}",
+        )
         db.add(content)
         db.commit()
         db.refresh(content)
         try:
-            job = jobs_service.create_job(db, job_type="image", persona_id=persona.id, content_id=content.id, payload={"prompt": full_prompt, "lora": lora, "negative_prompt": body.negative_prompt, "reference_image": ref_comfy_name, "comfy_prompt_id": comfy_resp.get("prompt_id")}, machine=MACHINE_LABEL)
+            job = jobs_service.create_job(
+                db,
+                job_type="image",
+                persona_id=persona.id,
+                content_id=content.id,
+                payload={
+                    "prompt": full_prompt,
+                    "lora": lora,
+                    "negative_prompt": body.negative_prompt,
+                    "reference_image": ref_comfy_name,
+                    "comfy_prompt_id": comfy_resp.get("prompt_id"),
+                    "model_profile": model_profile,
+                    "lora_strength_model": body.lora_strength_model,
+                    "lora_strength_clip": body.lora_strength_clip,
+                },
+                machine=MACHINE_LABEL,
+            )
             jobs_service.transition(db, job, JobState.DISPATCHING)
             jobs_service.transition(db, job, JobState.RUNNING)
-            jobs_service.record_run(db, job, prompt=full_prompt, negative_prompt=body.negative_prompt, loras=[{"name": lora, "strength": 1.0}] if lora else None, backend="comfy", machine=MACHINE_LABEL)
+            jobs_service.record_run(
+                db,
+                job,
+                prompt=full_prompt,
+                negative_prompt=body.negative_prompt,
+                loras=[{"name": lora, "strength": body.lora_strength_model}] if lora else None,
+                backend="comfy",
+                machine=MACHINE_LABEL,
+                model=model_profile,
+            )
             db.commit()
         except Exception as exc:
             logger.warning("job mirror (image queue) skipped: %s", exc)

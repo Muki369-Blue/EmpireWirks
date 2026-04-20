@@ -6,8 +6,10 @@ set -euo pipefail
 REPO_DIR="/Users/bluewirks.max/dev/apps/Empire"
 BACKEND_PORT=8800
 FRONTEND_PORT=3000
+BACKEND_APP_MODULE="${BACKEND_APP_MODULE:-backend.main:app}"
 
 echo "🚀 Starting AI Content Empire..."
+echo "ℹ︎ Backend module: ${BACKEND_APP_MODULE}"
 
 # Clear existing app ports so the launcher always brings up fresh processes.
 # Port 8000 is included because older builds used it and any leftover process
@@ -23,10 +25,16 @@ echo "✓ Ports 8000, ${BACKEND_PORT} and ${FRONTEND_PORT} cleared"
 rm -rf "${REPO_DIR}/frontend/.next" 2>/dev/null || true
 echo "✓ Frontend .next cache cleared"
 
+# Load local secrets for backend startup. Priority:
+# 1) .env.local in repo root (git-ignored)
+# 2) macOS Keychain item: EMPIRE_ELEVENLABS_API_KEY
+BACKEND_SECRET_BOOTSTRAP='if [ -f .env.local ]; then set -a; . ./.env.local; set +a; fi; if [ -z "${ELEVENLABS_API_KEY:-}" ]; then export ELEVENLABS_API_KEY="$(security find-generic-password -a "$USER" -s EMPIRE_ELEVENLABS_API_KEY -w 2>/dev/null || true)"; fi'
+BACKEND_SECRET_BOOTSTRAP_ESCAPED="${BACKEND_SECRET_BOOTSTRAP//\"/\\\"}"
+
 # Start backend in a new Terminal window
 osascript <<EOF
 tell application "Terminal"
-    do script "cd ${REPO_DIR} && backend/.venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port ${BACKEND_PORT} --reload 2>&1"
+    do script "cd ${REPO_DIR} && ${BACKEND_SECRET_BOOTSTRAP_ESCAPED} && backend/.venv/bin/uvicorn ${BACKEND_APP_MODULE} --host 0.0.0.0 --port ${BACKEND_PORT} --reload 2>&1"
     set custom title of front window to "Empire - Backend :${BACKEND_PORT}"
     activate
 end tell

@@ -8,6 +8,7 @@ import os
 from contextlib import asynccontextmanager
 from typing import List
 
+import asyncio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -18,6 +19,11 @@ try:
     from .services import shadowwirk as sw_service
     from .workers.queue import start_worker, stop_worker
     from .config import IS_HUB, EMPIRE_ROLE
+    # ── Webhook ingestor (modular pipeline) ──────────────────────────
+    from .app.queue.queue import event_queue as ingestor_queue
+    from .app.services.storage import ensure_storage_dir as ingestor_ensure_storage
+    from .app.workers.audio_worker import run_audio_worker as ingestor_audio_worker
+    from .app.core.config import settings as ingestor_settings
     # ── Routers ──────────────────────────────────────────────────────
     from .api.personas import router as personas_router
     from .api.generation import router as generation_router
@@ -44,6 +50,10 @@ except ImportError:
     from services import shadowwirk as sw_service
     from workers.queue import start_worker, stop_worker
     from config import IS_HUB, EMPIRE_ROLE
+    from app.queue.queue import event_queue as ingestor_queue
+    from app.services.storage import ensure_storage_dir as ingestor_ensure_storage
+    from app.workers.audio_worker import run_audio_worker as ingestor_audio_worker
+    from app.core.config import settings as ingestor_settings
     from api.personas import router as personas_router
     from api.generation import router as generation_router
     from api.video import router as video_router
@@ -83,6 +93,9 @@ def _allowed_frontend_origins() -> List[str]:
 
 # ── Lifespan ─────────────────────────────────────────────────────────
 
+_ingestor_tasks: list = []
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
@@ -94,10 +107,21 @@ async def lifespan(app: FastAPI):
     sw_service.start_ping()
     start_scheduler()
     start_worker()
-    logger.info("Empire started (role=%s).", EMPIRE_ROLE)
+    # Start modular webhook audio workers
+    ingestor_ensure_storage()
+    for idx in range(ingestor_settings.worker_count):
+        task = asyncio.create_task(
+            ingestor_audio_worker(idx + 1), name=f"ingestor-audio-worker-{idx + 1}"
+        )
+        _ingestor_tasks.append(task)
+    logger.info("Empire started (role=%s, ingestor_workers=%s).", EMPIRE_ROLE, ingestor_settings.worker_count)
     yield
     stop_scheduler()
     stop_worker()
+    for task in _ingestor_tasks:
+        task.cancel()
+    await asyncio.gather(*_ingestor_tasks, return_exceptions=True)
+    _ingestor_tasks.clear()
     comfy_api._shutdown_comfyui()
 
 

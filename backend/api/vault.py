@@ -3,19 +3,66 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 try:
-    from ..database import get_db, Persona, Content, ContentSet
+    from ..database import (
+        get_db,
+        Persona,
+        Content,
+        ContentSet,
+        PostQueue,
+        AssetScore,
+        GenerationJob,
+        ContentMetrics,
+        CaptionMetrics,
+    )
 except ImportError:
-    from database import get_db, Persona, Content, ContentSet
+    from database import (
+        get_db,
+        Persona,
+        Content,
+        ContentSet,
+        PostQueue,
+        AssetScore,
+        GenerationJob,
+        ContentMetrics,
+        CaptionMetrics,
+    )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["vault"])
+
+
+VAULT_DIR = Path.home() / "Documents" / "ComfyUI" / "output" / "Empire" / "vault"
+
+
+def _delete_vault_file(path_value: Optional[str]) -> None:
+    if not path_value:
+        return
+    if not path_value.startswith("vault/"):
+        return
+
+    rel_name = path_value[len("vault/"):]
+    vault_root = VAULT_DIR.resolve()
+    target = (VAULT_DIR / rel_name).resolve()
+
+    try:
+        target.relative_to(vault_root)
+    except ValueError:
+        logger.warning("Refusing to delete file outside vault: %s", path_value)
+        return
+
+    if target.exists() and target.is_file():
+        try:
+            target.unlink()
+        except Exception as e:
+            logger.warning("Failed to delete vault file %s: %s", target, e)
 
 
 @router.get("/vault/")
@@ -72,6 +119,31 @@ def update_tags(content_id: int, tags: str, db: Session = Depends(get_db)):
     content.tags = tags
     db.commit()
     return {"id": content_id, "tags": content.tags}
+
+
+@router.delete("/vault/{content_id}")
+def delete_vault_item(content_id: int, db: Session = Depends(get_db)):
+    content = db.query(Content).filter(Content.id == content_id).first()
+    if not content:
+        raise HTTPException(status_code=404, detail="Content not found")
+
+    # Clean up dependent rows before deleting content.
+    db.query(PostQueue).filter(PostQueue.content_id == content_id).delete(synchronize_session=False)
+    db.query(AssetScore).filter(AssetScore.content_id == content_id).delete(synchronize_session=False)
+    db.query(ContentMetrics).filter(ContentMetrics.content_id == content_id).delete(synchronize_session=False)
+    db.query(CaptionMetrics).filter(CaptionMetrics.content_id == content_id).delete(synchronize_session=False)
+
+    jobs = db.query(GenerationJob).filter(GenerationJob.content_id == content_id).all()
+    for job in jobs:
+        db.delete(job)
+
+    # Remove any associated vault files if they are local vault paths.
+    for path_value in {content.file_path, content.upscaled_path, content.watermarked_path}:
+        _delete_vault_file(path_value)
+
+    db.delete(content)
+    db.commit()
+    return {"status": "deleted", "id": content_id}
 
 
 @router.get("/vault/stats")

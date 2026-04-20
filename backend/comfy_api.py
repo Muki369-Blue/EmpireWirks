@@ -38,6 +38,25 @@ logger = logging.getLogger(__name__)
 COMFY_BASE = f"http://127.0.0.1:{COMFY_PORT}"
 CLIENT_ID = str(uuid.uuid4())
 
+IMAGE_MODEL_PROFILES = {
+    "flux_schnell": {
+        "clip_name1": "t5xxl_fp16.safetensors",
+        "clip_name2": "clip_l.safetensors",
+        "unet_name": "flux1-schnell.safetensors",
+        "vae_name": "ae.safetensors",
+        "steps": 4,
+        "guidance": 3.5,
+    },
+    "flux2_klein": {
+        "clip_name1": "t5xxl_fp16.safetensors",
+        "clip_name2": "clip_l.safetensors",
+        "unet_name": "Flux2-Klein-9B-True-v2-bf16.safetensors",
+        "vae_name": "ae.safetensors",
+        "steps": 6,
+        "guidance": 3.5,
+    },
+}
+
 # Managed ComfyUI subprocess (if we started it)
 _comfyui_process: Optional[subprocess.Popen] = None
 
@@ -276,6 +295,9 @@ def _flux_workflow(
     steps: int = 4,
     guidance: float = 3.5,
     seed: Optional[int] = None,
+    model_profile: Optional[str] = None,
+    lora_strength_model: float = 0.85,
+    lora_strength_clip: float = 0.85,
 ) -> dict:
     """
     Flux Schnell text-to-image workflow from AI-ArtWirks.
@@ -298,6 +320,9 @@ def _flux_workflow(
     if seed is None:
         seed = random.randint(0, 2**53)
 
+    profile_name = (model_profile or "flux_schnell").lower()
+    profile = IMAGE_MODEL_PROFILES.get(profile_name, IMAGE_MODEL_PROFILES["flux_schnell"])
+
     # Flux doesn't support a separate negative conditioning node.
     # Append negative terms as "Avoid:" suffix — established Flux community pattern.
     final_prompt = positive_prompt
@@ -308,22 +333,22 @@ def _flux_workflow(
         "11": {
             "class_type": "DualCLIPLoader",
             "inputs": {
-                "clip_name1": "t5xxl_fp16.safetensors",
-                "clip_name2": "clip_l.safetensors",
+                "clip_name1": profile["clip_name1"],
+                "clip_name2": profile["clip_name2"],
                 "type": "flux",
             },
         },
         "12": {
             "class_type": "UNETLoader",
             "inputs": {
-                "unet_name": "flux1-schnell.safetensors",
+                "unet_name": profile["unet_name"],
                 "weight_dtype": "default",
             },
         },
         "10": {
             "class_type": "VAELoader",
             "inputs": {
-                "vae_name": "ae.safetensors",
+                "vae_name": profile["vae_name"],
             },
         },
         "6": {
@@ -408,8 +433,8 @@ def _flux_workflow(
             "class_type": "LoraLoader",
             "inputs": {
                 "lora_name": lora_name,
-                "strength_model": 0.85,
-                "strength_clip": 0.85,
+                "strength_model": lora_strength_model,
+                "strength_clip": lora_strength_clip,
                 "model": ["12", 0],
                 "clip": ["11", 0],
             },
@@ -458,6 +483,9 @@ def _flux_redux_workflow(
     guidance: float = 3.5,
     redux_strength: float = 0.85,
     seed: Optional[int] = None,
+    model_profile: Optional[str] = None,
+    lora_strength_model: float = 0.85,
+    lora_strength_clip: float = 0.85,
 ) -> dict:
     """
     Flux Schnell + Redux face/style consistency workflow.
@@ -475,8 +503,26 @@ def _flux_redux_workflow(
     if seed is None:
         seed = random.randint(0, 2**53)
 
+    profile_name = (model_profile or "flux_schnell").lower()
+    profile = IMAGE_MODEL_PROFILES.get(profile_name, IMAGE_MODEL_PROFILES["flux_schnell"])
+    steps = profile.get("steps", steps)
+    guidance = profile.get("guidance", guidance)
+
     # Start with the base Flux workflow
-    workflow = _flux_workflow(positive_prompt, lora_name, negative_prompt, width, height, batch_size, steps, guidance, seed)
+    workflow = _flux_workflow(
+        positive_prompt,
+        lora_name,
+        negative_prompt,
+        width,
+        height,
+        batch_size,
+        steps,
+        guidance,
+        seed,
+        model_profile,
+        lora_strength_model,
+        lora_strength_clip,
+    )
 
     # Add Redux nodes
     workflow["38"] = {
@@ -935,12 +981,41 @@ def queue_prompt(
     reference_image: Optional[str] = None,
     negative_prompt: Optional[str] = None,
     seed: Optional[int] = None,
+    model_profile: Optional[str] = None,
+    lora_strength_model: float = 0.85,
+    lora_strength_clip: float = 0.85,
 ) -> dict:
     """Queue a generation job on ComfyUI. Uses Redux workflow if reference_image is provided."""
+    profile_name = (model_profile or "flux_schnell").lower()
+    profile = IMAGE_MODEL_PROFILES.get(profile_name, IMAGE_MODEL_PROFILES["flux_schnell"])
+    steps = profile.get("steps", 4)
+    guidance = profile.get("guidance", 3.5)
+
     if reference_image:
-        workflow = _flux_redux_workflow(positive_prompt, reference_image, lora_name, negative_prompt, seed=seed)
+        workflow = _flux_redux_workflow(
+            positive_prompt,
+            reference_image,
+            lora_name,
+            negative_prompt,
+            steps=steps,
+            guidance=guidance,
+            seed=seed,
+            model_profile=profile_name,
+            lora_strength_model=lora_strength_model,
+            lora_strength_clip=lora_strength_clip,
+        )
     else:
-        workflow = _flux_workflow(positive_prompt, lora_name, negative_prompt, seed=seed)
+        workflow = _flux_workflow(
+            positive_prompt,
+            lora_name,
+            negative_prompt,
+            steps=steps,
+            guidance=guidance,
+            seed=seed,
+            model_profile=profile_name,
+            lora_strength_model=lora_strength_model,
+            lora_strength_clip=lora_strength_clip,
+        )
     payload = {
         "prompt": workflow,
         "client_id": CLIENT_ID,

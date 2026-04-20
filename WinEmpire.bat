@@ -2,6 +2,8 @@
 title WinEmpire - AI Content Empire Launcher
 cd /d "%~dp0"
 
+if "%BACKEND_APP_MODULE%"=="" set "BACKEND_APP_MODULE=backend.main:app"
+
 echo.
 echo  ========================================
 echo   WinEmpire - AI Content Empire
@@ -29,9 +31,31 @@ echo Starting ComfyUI Desktop...
 start "" "C:\Program Files\ComfyUI\ComfyUI.exe"
 timeout /t 3 /nobreak >nul
 
+:: Load local secrets from repo .env.local (git-ignored)
+if exist "%~dp0.env.local" (
+	for /f "usebackq tokens=1,* delims==" %%A in ("%~dp0.env.local") do (
+		if /I "%%~A"=="ELEVENLABS_API_KEY" set "ELEVENLABS_API_KEY=%%~B"
+		if /I "%%~A"=="ELEVENLABS_WEBHOOK_SECRET" set "ELEVENLABS_WEBHOOK_SECRET=%%~B"
+	)
+)
+
+if defined ELEVENLABS_API_KEY (
+	echo ELEVENLABS_API_KEY loaded for backend.
+) else (
+	echo WARNING: ELEVENLABS_API_KEY is not set. Voice provider calls may fail.
+)
+
+if defined ELEVENLABS_WEBHOOK_SECRET (
+	echo ELEVENLABS_WEBHOOK_SECRET loaded for backend.
+) else (
+	echo WARNING: ELEVENLABS_WEBHOOK_SECRET is not set. Webhook signature validation may fail.
+)
+
+echo Backend module: %BACKEND_APP_MODULE%
+
 :: Start Backend (FastAPI on 0.0.0.0:8800 — accessible via Tailscale + LAN)
 echo Starting Backend (FastAPI :8800, role=shadow)...
-start "WinEmpire - Backend :8800" cmd /k "cd /d "%~dp0" && .venv\Scripts\activate.bat && set EMPIRE_ROLE=shadow && python -m uvicorn backend.main:app --host 0.0.0.0 --port 8800 --reload"
+start "WinEmpire - Backend :8800" cmd /k "cd /d "%~dp0" && .venv\Scripts\activate.bat && set EMPIRE_ROLE=shadow && python -m uvicorn %BACKEND_APP_MODULE% --host 0.0.0.0 --port 8800 --reload"
 
 timeout /t 2 /nobreak >nul
 

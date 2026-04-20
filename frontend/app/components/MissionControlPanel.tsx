@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   fetchJobs,
   fetchJobStats,
+  fetchElevenLabsWebhookEvents,
   cancelJob,
   fetchCampaigns,
   createCampaign,
@@ -16,6 +17,7 @@ import {
   JobStats,
   Campaign,
   CampaignTask,
+  ElevenLabsWebhookEvent,
   Persona,
 } from "../lib/api";
 
@@ -57,6 +59,7 @@ export default function MissionControlPanel({ personas }: { personas: Persona[] 
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
   const [tasks, setTasks] = useState<CampaignTask[]>([]);
+  const [webhookEvents, setWebhookEvents] = useState<ElevenLabsWebhookEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState("");
 
@@ -77,6 +80,8 @@ export default function MissionControlPanel({ personas }: { personas: Persona[] 
         ]);
         setJobs(j);
         setStats(s);
+        const hooks = await fetchElevenLabsWebhookEvents({ limit: 8 });
+        setWebhookEvents(hooks);
       } else {
         const c = await fetchCampaigns();
         setCampaigns(c);
@@ -183,6 +188,29 @@ export default function MissionControlPanel({ personas }: { personas: Persona[] 
               ))}
             </div>
           )}
+
+          <div className="bg-white/5 rounded p-3">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-semibold text-white">ElevenLabs Webhooks</h3>
+              <span className="text-[11px] text-gray-400">latest {webhookEvents.length}</span>
+            </div>
+            <div className="space-y-2 max-h-44 overflow-y-auto">
+              {webhookEvents.length === 0 && (
+                <div className="text-xs text-gray-500">No webhook events yet.</div>
+              )}
+              {webhookEvents.map((ev) => (
+                <div key={ev.id} className="bg-black/20 border border-white/10 rounded p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-cyan-300">{ev.event_type}</span>
+                    <span className="text-[10px] text-gray-500">{new Date(ev.created_at).toLocaleString()}</span>
+                  </div>
+                  {ev.transcription_text && (
+                    <p className="text-xs text-gray-300 mt-1 line-clamp-2">{ev.transcription_text}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
 
           {/* Filter */}
           <select

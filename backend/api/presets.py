@@ -227,3 +227,25 @@ def list_loras():
         recommended.append({**rec, "installed": rec["filename"] in installed_names})
 
     return {"installed": installed, "recommended": recommended}
+
+
+@router.get("/image-model-profiles")
+def list_image_model_profiles():
+    try:
+        from .. import comfy_api
+    except ImportError:
+        import comfy_api
+
+    profiles = []
+    for key, value in comfy_api.IMAGE_MODEL_PROFILES.items():
+        profiles.append(
+            {
+                "id": key,
+                "unet_name": value.get("unet_name"),
+                "vae_name": value.get("vae_name"),
+                "default_steps": value.get("steps"),
+                "default_guidance": value.get("guidance"),
+            }
+        )
+
+    return {"profiles": sorted(profiles, key=lambda p: p["id"])}

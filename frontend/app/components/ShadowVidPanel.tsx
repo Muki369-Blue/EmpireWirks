@@ -10,6 +10,7 @@ import {
   refineVideoPrompt,
   uploadVideoStartImageRemote,
   checkVideoStatusRemote,
+  shadowDownloadMp4Url,
   syncRemoteVideo,
   cancelActiveGenerations,
   SHADOW_WIRKS_URL,
@@ -114,14 +115,10 @@ export default function ShadowVidPanel({ personas, shadowOnline }: { personas: P
     return () => clearInterval(interval);
   }, [contentId, videoStatus]);
 
-  // Reset generation state when Shadow-Wirk goes offline
+  // If Shadow-Wirk briefly drops, keep the active job alive and let polling retry.
   useEffect(() => {
     if (!shadowOnline && generatingVideo) {
-      setGeneratingVideo(false);
-      setVideoProgress(0);
-      setVideoStatus(null);
-      setContentId(null);
-      setVideoResult("Shadow-Wirk went offline — generation interrupted. Ready for next gen.");
+      setVideoResult("Shadow-Wirk temporarily unreachable — retrying status checks...");
     }
   }, [shadowOnline]);
 
@@ -552,6 +549,7 @@ export default function ShadowVidPanel({ personas, shadowOnline }: { personas: P
               {videoOutputs.map((out, i) => {
                 const src = `${videoBase}/images/${encodeURIComponent(out.filename)}?subfolder=${encodeURIComponent(out.subfolder || "")}`;
                 const downloadUrl = `${videoBase}/download/${encodeURIComponent(out.filename)}?subfolder=${encodeURIComponent(out.subfolder || "")}`;
+                const downloadMp4 = shadowDownloadMp4Url(videoBase, out.filename, out.subfolder || "Empire");
                 return (
                 <div key={i} className="text-center">
                   <img
@@ -559,13 +557,22 @@ export default function ShadowVidPanel({ personas, shadowOnline }: { personas: P
                     alt="Generated video"
                     className="max-w-full rounded-lg mx-auto"
                   />
-                  <a
-                    href={downloadUrl}
-                    download={out.filename}
-                    className="inline-block mt-2 text-xs text-violet-400 hover:text-violet-300"
-                  >
-                    ⬇ Download {out.filename}
-                  </a>
+                  <div className="mt-2 flex flex-wrap justify-center gap-3 text-xs">
+                    <a
+                      href={downloadMp4}
+                      download={`${out.filename.replace(/\.[^.]+$/, "")}.mp4`}
+                      className="text-emerald-400 hover:text-emerald-300"
+                    >
+                      ⬇ Download MP4
+                    </a>
+                    <a
+                      href={downloadUrl}
+                      download={out.filename}
+                      className="text-violet-400 hover:text-violet-300"
+                    >
+                      ⬇ Original
+                    </a>
+                  </div>
                 </div>
                 );
               })}

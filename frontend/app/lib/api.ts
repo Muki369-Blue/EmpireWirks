@@ -283,6 +283,7 @@ export async function triggerGeneration(
   batchSize: number = 1,
   negativePrompt?: string,
   loraOverride?: string,
+  imageModelProfile?: string,
 ): Promise<Generation[]> {
   const res = await fetch(`${API}/generate/${personaId}`, {
     method: "POST",
@@ -292,6 +293,7 @@ export async function triggerGeneration(
       batch_size: batchSize,
       negative_prompt: negativePrompt || null,
       lora_override: loraOverride || null,
+      image_model_profile: imageModelProfile || null,
     }),
   });
   if (!res.ok) throw new Error("Failed to trigger generation");
@@ -564,6 +566,10 @@ export async function checkVideoStatusRemote(
   return res.json();
 }
 
+export function shadowDownloadMp4Url(shadowUrl: string, filename: string, subfolder: string = "Empire"): string {
+  return `${shadowUrl}/download-mp4/${encodeURIComponent(filename)}?subfolder=${encodeURIComponent(subfolder)}`;
+}
+
 export async function syncRemoteVideo(
   remoteContentId: number
 ): Promise<{ id: number; status: string; vault_path: string; output_path?: string }> {
@@ -639,6 +645,11 @@ export async function fetchVaultStats(): Promise<any> {
   const res = await fetch(`${API}/vault/stats`);
   if (!res.ok) throw new Error("Failed to fetch vault stats");
   return res.json();
+}
+
+export async function deleteVaultItem(contentId: number): Promise<void> {
+  const res = await fetch(`${API}/vault/${contentId}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete vault item");
 }
 
 // ─── Analytics ────────────────────
@@ -768,10 +779,25 @@ export interface RecommendedLora {
   installed: boolean;
 }
 
+export interface ImageModelProfile {
+  id: string;
+  unet_name: string;
+  vae_name: string;
+  default_steps: number;
+  default_guidance: number;
+}
+
 export async function fetchLoras(): Promise<{ installed: InstalledLora[]; recommended: RecommendedLora[] }> {
   const res = await fetch(`${API}/loras`);
   if (!res.ok) return { installed: [], recommended: [] };
   return res.json();
+}
+
+export async function fetchImageModelProfiles(): Promise<ImageModelProfile[]> {
+  const res = await fetch(`${API}/image-model-profiles`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return Array.isArray(data?.profiles) ? data.profiles : [];
 }
 
 export async function fetchPersonaPresets(): Promise<PersonaPreset[]> {
@@ -861,6 +887,55 @@ export async function refinePrompt(
   return res.json();
 }
 
+export interface PersonaCoachResult {
+  name: string;
+  prompt_base: string;
+  personality: string;
+  opening_line: string;
+  model?: string;
+}
+
+export interface AppCoachResult {
+  reply: string;
+  next_actions: string[];
+  priority: "now" | "next" | "later" | string;
+  model?: string;
+}
+
+export async function personaCoach(
+  idea: string,
+  vibe?: string
+): Promise<PersonaCoachResult> {
+  const res = await fetch(`${API}/persona-coach`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ idea, vibe }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Unknown error" }));
+    throw new Error(err.detail || `Persona coach failed (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function appCoach(input: {
+  tab: string;
+  user_message: string;
+  app_goal?: string;
+  context?: Record<string, unknown>;
+}): Promise<AppCoachResult> {
+  const res = await fetch(`${API}/app-coach`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Unknown error" }));
+    throw new Error(err.detail || `App coach failed (${res.status})`);
+  }
+  return res.json();
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // Phase 2-4: Jobs, Campaigns, Memory, Agents, Review
 // ═══════════════════════════════════════════════════════════════════
@@ -899,6 +974,15 @@ export interface EventLogEntry {
   actor: string | null;
   note: string | null;
   created_at: string;
+}
+
+export interface ElevenLabsWebhookEvent {
+  id: number;
+  event_type: string;
+  actor?: string | null;
+  created_at: string;
+  transcription_text?: string | null;
+  payload?: Record<string, any> | null;
 }
 
 export async function fetchJobs(opts?: {
@@ -945,6 +1029,19 @@ export async function cancelActiveGenerations(): Promise<{ interrupted: boolean;
 
 export async function fetchJobEvents(id: number): Promise<EventLogEntry[]> {
   const res = await fetch(`${API}/jobs/${id}/events`);
+  return res.json();
+}
+
+export async function fetchElevenLabsWebhookEvents(opts?: {
+  limit?: number;
+  event_type?: string;
+}): Promise<ElevenLabsWebhookEvent[]> {
+  const params = new URLSearchParams();
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  if (opts?.event_type) params.set("event_type", opts.event_type);
+  const query = params.toString();
+  const res = await fetch(`${API}/webhooks/elevenlabs/events${query ? `?${query}` : ""}`);
+  if (!res.ok) return [];
   return res.json();
 }
 

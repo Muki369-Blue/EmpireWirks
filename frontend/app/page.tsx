@@ -16,6 +16,7 @@ import ReviewInboxPanel from "./components/ReviewInboxPanel";
 import AgentPanel from "./components/AgentPanel";
 import PersonaMemoryPanel from "./components/PersonaMemoryPanel";
 import MetricsPanel from "./components/MetricsPanel";
+import VoiceCoachPanel from "./components/VoiceCoachPanel";
 import {
   API,
   pingShadowHealth,
@@ -81,7 +82,7 @@ const TAB_GROUPS = [
   },
 ] as const;
 
-const TABS = TAB_GROUPS.flatMap((g) => g.tabs);
+const TABS: Array<(typeof TAB_GROUPS)[number]["tabs"][number]> = TAB_GROUPS.flatMap((g) => [...g.tabs]);
 type TabId = (typeof TAB_GROUPS)[number]["tabs"][number]["id"];
 
 export default function Dashboard() {
@@ -99,6 +100,9 @@ export default function Dashboard() {
   const [shadowPing, setShadowPing] = useState<{ latency: number; comfyui: boolean } | null>(null);
   const [shadowPinging, setShadowPinging] = useState(false);
   const [showShadowPanel, setShowShadowPanel] = useState(false);
+
+  const activeCount = generations.filter((g) => g.status === "generating").length;
+  const completedCount = generations.filter((g) => g.status === "completed").length;
 
   const pingShadow = useCallback(async () => {
     setShadowPinging(true);
@@ -704,6 +708,21 @@ export default function Dashboard() {
       <div className={tab === "memory" ? "" : "hidden"}>
         <PersonaMemoryPanel personas={personas} />
       </div>
+
+      <VoiceCoachPanel
+        tab={TABS.find((t) => t.id === tab)?.label ?? tab}
+        appGoal="Create, curate, distribute, and scale profitable AI content operations"
+        context={{
+          tab,
+          personas_count: personas.length,
+          links_count: links.length,
+          generations_active: activeCount,
+          generations_completed: completedCount,
+          review_pending_hint: generations.filter((g) => g.status === "completed").length,
+          shadow_online: !!health?.shadow_wirks,
+          comfy_online: !!health?.comfyui,
+        }}
+      />
     </div>
   );
 }
