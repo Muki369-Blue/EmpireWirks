@@ -43,12 +43,21 @@ class Persona(Base):
     personality = Column(Text, nullable=True)  # Chat personality description
     reference_image = Column(String, nullable=True)  # Path to face reference image for Redux
     voice = Column(String, nullable=True)  # Edge-TTS voice name (e.g. en-US-AriaNeural)
+    socialman_token = Column(Text, nullable=True)
+    socialman_enabled = Column(Boolean, default=False)
+    socialman_platforms = Column(JSON, nullable=True)
+    socialman_title_template = Column(Text, nullable=True)
+    socialman_description_template = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     contents = relationship("Content", back_populates="persona", cascade="all, delete-orphan")
     schedules = relationship("Schedule", back_populates="persona", cascade="all, delete-orphan")
     chat_messages = relationship("ChatMessage", back_populates="persona", cascade="all, delete-orphan")
     analytics = relationship("Analytics", back_populates="persona", cascade="all, delete-orphan")
+
+    @property
+    def socialman_configured(self) -> bool:
+        return bool((self.socialman_token or "").strip())
 
 
 class Content(Base):

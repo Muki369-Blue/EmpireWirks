@@ -6,10 +6,13 @@ set -euo pipefail
 REPO_DIR="/Users/bluewirks.max/dev/apps/Empire"
 BACKEND_PORT=8800
 FRONTEND_PORT=3000
-BACKEND_APP_MODULE="${BACKEND_APP_MODULE:-backend.main:app}"
+BACKEND_APP_MODULE="backend.main:app"
 
 echo "🚀 Starting AI Content Empire..."
 echo "ℹ︎ Backend module: ${BACKEND_APP_MODULE}"
+if [ -n "${BACKEND_APP_MODULE_OVERRIDE:-}" ] && [ "${BACKEND_APP_MODULE_OVERRIDE}" != "backend.main:app" ]; then
+    echo "⚠︎ Ignoring BACKEND_APP_MODULE_OVERRIDE=${BACKEND_APP_MODULE_OVERRIDE} (forced to backend.main:app)"
+fi
 
 # Clear existing app ports so the launcher always brings up fresh processes.
 # Port 8000 is included because older builds used it and any leftover process

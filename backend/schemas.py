@@ -9,6 +9,20 @@ class PersonaCreate(BaseModel):
     lora_name: Optional[str] = None
     personality: Optional[str] = None
     voice: Optional[str] = None
+    socialman_token: Optional[str] = None
+    socialman_enabled: bool = False
+    socialman_platforms: Optional[List[str]] = None
+    socialman_title_template: Optional[str] = None
+    socialman_description_template: Optional[str] = None
+
+
+class PersonaSocialManConfigIn(BaseModel):
+    enabled: bool = False
+    token: Optional[str] = None
+    clear_token: bool = False
+    platforms: Optional[List[str]] = None
+    title_template: Optional[str] = None
+    description_template: Optional[str] = None
 
 
 class PersonaOut(BaseModel):
@@ -20,6 +34,11 @@ class PersonaOut(BaseModel):
     personality: Optional[str] = None
     reference_image: Optional[str] = None
     voice: Optional[str] = None
+    socialman_enabled: bool = False
+    socialman_configured: bool = False
+    socialman_platforms: Optional[List[str]] = None
+    socialman_title_template: Optional[str] = None
+    socialman_description_template: Optional[str] = None
     created_at: Optional[datetime] = None
 
     class Config:

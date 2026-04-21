@@ -122,6 +122,11 @@ export interface Persona {
   personality?: string | null;
   reference_image?: string | null;
   voice?: string | null;
+  socialman_enabled?: boolean;
+  socialman_configured?: boolean;
+  socialman_platforms?: string[] | null;
+  socialman_title_template?: string | null;
+  socialman_description_template?: string | null;
   created_at: string | null;
 }
 
@@ -232,6 +237,12 @@ export async function createPersona(data: {
   prompt_base: string;
   lora_name?: string;
   personality?: string;
+  voice?: string;
+  socialman_token?: string;
+  socialman_enabled?: boolean;
+  socialman_platforms?: string[];
+  socialman_title_template?: string;
+  socialman_description_template?: string;
 }): Promise<Persona> {
   const res = await fetch(`${API}/personas/`, {
     method: "POST",
@@ -247,6 +258,34 @@ export async function createPersona(data: {
 
 export async function deletePersona(id: number): Promise<void> {
   await fetch(`${API}/personas/${id}`, { method: "DELETE" });
+}
+
+export async function setPersonaSocialMan(
+  personaId: number,
+  data: {
+    enabled: boolean;
+    token?: string;
+    clear_token?: boolean;
+    platforms?: string[];
+    title_template?: string;
+    description_template?: string;
+  }
+): Promise<Persona> {
+  const res = await fetch(`${API}/personas/${personaId}/socialman`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to save SocialMan settings");
+  }
+  return res.json();
+}
+
+export async function clearPersonaSocialMan(personaId: number): Promise<void> {
+  const res = await fetch(`${API}/personas/${personaId}/socialman`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to clear SocialMan settings");
 }
 
 // ─── LoRA Training ────────────────

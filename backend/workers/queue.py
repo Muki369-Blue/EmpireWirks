@@ -29,6 +29,23 @@ _stop_event = threading.Event()
 POLL_INTERVAL = 5  # seconds
 
 
+def _build_socialman_publish_config(persona: Persona | None, prompt_text: str) -> dict | None:
+    if not persona or not persona.socialman_enabled:
+        return None
+    token = (persona.socialman_token or "").strip()
+    platforms = [p for p in (persona.socialman_platforms or []) if isinstance(p, str) and p.strip()]
+    if not token or not platforms:
+        return None
+    return {
+        "token": token,
+        "platforms": platforms,
+        "persona_name": persona.name,
+        "prompt": prompt_text,
+        "title_template": persona.socialman_title_template,
+        "description_template": persona.socialman_description_template,
+    }
+
+
 def _worker_loop():
     logger.info("Job queue worker started")
     while not _stop_event.is_set():
@@ -42,7 +59,18 @@ def _worker_loop():
                 .first()
             )
             if job:
+                job_type = job.job_type
                 _process_job(db, job)
+                # After each generation job: unload ComfyUI models before picking
+                # up the next run.  On 36 GB unified memory the model stays resident
+                # unless we explicitly free it, which can OOM the next job.
+                if job_type in ("image", "video"):
+                    try:
+                        from backend import comfy_api
+                        comfy_api.free_memory(unload_models=True)
+                        logger.info("Models unloaded after %s job", job_type)
+                    except Exception as _mem_exc:
+                        logger.warning("Post-job free_memory failed: %s", _mem_exc)
             db.close()
         except Exception as e:
             logger.error("Worker loop error: %s", e)
@@ -64,8 +92,8 @@ def _process_job(db, job: GenerationJob):
         elif job.job_type == "plan":
             _run_plan_job(db, job)
         elif job.job_type in ("image", "video"):
-            # Image/video jobs are dispatched directly via ComfyUI in the router;
-            # the worker only handles async re-dispatch for retries or campaign tasks
+            # Image/video jobs run through the worker so ComfyUI stays serialized
+            # and models can be unloaded between runs.
             _run_generation_job(db, job)
         else:
             logger.warning("Unknown job type: %s", job.job_type)
@@ -148,6 +176,7 @@ def _run_generation_job(db, job: GenerationJob):
     image_model_profile = (payload.get("model_profile") or "flux_schnell").lower()
     image_model_tag = f"model:{image_model_profile}"
     persona = db.query(Persona).filter(Persona.id == job.persona_id).first() if job.persona_id else None
+    socialman_publish = _build_socialman_publish_config(persona, payload.get("prompt", "")) if job.job_type == "image" else None
 
     jobs_service.transition(db, job, JobState.RUNNING, actor="worker")
     db.commit()
@@ -180,6 +209,7 @@ def _run_generation_job(db, job: GenerationJob):
             model_profile=model_profile,
             lora_strength_model=lora_strength_model,
             lora_strength_clip=lora_strength_clip,
+            socialman_publish=socialman_publish,
         )
 
     if "error" in comfy_resp:
@@ -188,6 +218,7 @@ def _run_generation_job(db, job: GenerationJob):
         return
 
     prompt_id = comfy_resp.get("prompt_id")
+    socialman_applied = bool(socialman_publish and comfy_resp.get("socialman_applied"))
 
     # Create content record if one doesn't already exist
     content = db.query(Content).filter(Content.id == job.content_id).first() if job.content_id else None
@@ -243,6 +274,9 @@ def _run_generation_job(db, job: GenerationJob):
         first_output = result["outputs"][0]
         content.file_path = first_output["filename"]
         content.status = "completed"
+        if socialman_applied:
+            content.is_posted = True
+            content.posted_platforms = ",".join(socialman_publish.get("platforms", []))
         db.commit()
 
         # Post-process: image gets upscale+watermark; video gets vault save

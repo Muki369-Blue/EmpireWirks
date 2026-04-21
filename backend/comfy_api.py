@@ -57,8 +57,19 @@ IMAGE_MODEL_PROFILES = {
     },
 }
 
+SOCIALMAN_PLATFORM_NODE_MAP = {
+    "facebook": "FacebookPosterData",
+    "instagram": "InstagramPosterData",
+    "linkedin": "LinkedinPosterData",
+    "pinterest": "PinterestPosterData",
+    "tiktok": "TiktokPosterData",
+    "twitter": "TwitterPosterData",
+}
+
 # Managed ComfyUI subprocess (if we started it)
 _comfyui_process: Optional[subprocess.Popen] = None
+_socialman_object_info_cache: set[str] = set()
+_socialman_object_info_checked_at = 0.0
 
 # ─── Progress Tracking ───────────────────────────────────────────────
 
@@ -72,6 +83,267 @@ def get_progress(prompt_id: str) -> dict:
     """Get progress for a prompt_id. Returns {"value": N, "max": M} or empty dict."""
     with _progress_lock:
         return _progress.get(prompt_id, {}).copy()
+
+
+def _normalize_socialman_platforms(platforms: Optional[list[str]]) -> list[str]:
+    normalized: list[str] = []
+    for platform in platforms or []:
+        value = (platform or "").strip().lower()
+        if value in SOCIALMAN_PLATFORM_NODE_MAP and value not in normalized:
+            normalized.append(value)
+    return normalized
+
+
+def _render_socialman_template(
+    template: Optional[str],
+    *,
+    default: str,
+    persona_name: str,
+    prompt_text: str,
+    platform: str,
+) -> str:
+    if not template:
+        return default
+    try:
+        rendered = template.format(persona=persona_name, prompt=prompt_text, platform=platform)
+        return rendered.strip() or default
+    except Exception:
+        logger.warning("Invalid SocialMan template for persona=%s platform=%s", persona_name, platform)
+        return template.strip() or default
+
+
+def _get_object_info_names() -> set[str]:
+    global _socialman_object_info_cache, _socialman_object_info_checked_at
+    now = time.time()
+    if _socialman_object_info_cache and now - _socialman_object_info_checked_at < 30:
+        return _socialman_object_info_cache
+    try:
+        resp = requests.get(f"{COMFY_BASE}/object_info", timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        if isinstance(data, dict):
+            _socialman_object_info_cache = set(data.keys())
+            _socialman_object_info_checked_at = now
+            return _socialman_object_info_cache
+    except Exception as exc:
+        logger.warning("Failed to query ComfyUI object_info: %s", exc)
+    return set()
+
+
+def _socialman_nodes_available(platforms: list[str]) -> bool:
+    available = _get_object_info_names()
+    if not available:
+        return False
+    required = {
+        "SocialManPoster",
+        "SocialManMediaToPoster",
+        "SocialManPostData",
+        *(SOCIALMAN_PLATFORM_NODE_MAP[p] for p in platforms if p in SOCIALMAN_PLATFORM_NODE_MAP),
+    }
+    missing = sorted(required - available)
+    if missing:
+        logger.warning("SocialMan nodes missing in ComfyUI: %s", ", ".join(missing))
+        return False
+    return True
+
+
+def _inject_socialman_nodes(workflow: dict, publish: Optional[dict], image_node_id: str = "8") -> tuple[dict, bool]:
+    if not publish:
+        return workflow, False
+
+    token = (publish.get("token") or "").strip()
+    platforms = _normalize_socialman_platforms(publish.get("platforms"))
+    if not token or not platforms:
+        return workflow, False
+    if not _socialman_nodes_available(platforms):
+        logger.info("Skipping SocialMan publish because required ComfyUI nodes are unavailable")
+        return workflow, False
+
+    persona_name = (publish.get("persona_name") or "Empire").strip() or "Empire"
+    prompt_text = (publish.get("prompt") or "").strip()
+    default_title = f"{persona_name} drop"
+    default_description = prompt_text or f"Fresh content from {persona_name}."
+    title_text = _render_socialman_template(
+        publish.get("title_template"),
+        default=default_title,
+        persona_name=persona_name,
+        prompt_text=prompt_text,
+        platform="all",
+    )
+    description_text = _render_socialman_template(
+        publish.get("description_template"),
+        default=default_description,
+        persona_name=persona_name,
+        prompt_text=prompt_text,
+        platform="all",
+    )
+    media_file = (publish.get("media_file") or f"{persona_name.lower().replace(' ', '_')}_{int(time.time())}.png").strip()
+
+    workflow["60"] = {
+        "class_type": "SocialManPostData",
+        "inputs": {
+            "title": title_text,
+            "description": description_text,
+        },
+    }
+    workflow["61"] = {
+        "class_type": "SocialManMediaToPoster",
+        "inputs": {
+            "media_file": media_file,
+            "images": [image_node_id, 0],
+        },
+    }
+    workflow["62"] = {
+        "class_type": "SocialManPoster",
+        "inputs": {
+            "token": token,
+            "show_status_banner": None,
+            "prepare_only": None,
+            "media_file_path": ["61", 0],
+            "post_data": ["60", 0],
+        },
+    }
+
+    if "twitter" in platforms:
+        workflow["70"] = {
+            "class_type": "TwitterPosterData",
+            "inputs": {
+                "caption": _render_socialman_template(
+                    publish.get("description_template"),
+                    default=description_text,
+                    persona_name=persona_name,
+                    prompt_text=prompt_text,
+                    platform="twitter",
+                ),
+            },
+        }
+        workflow["62"]["inputs"]["twitter_data"] = ["70", 0]
+
+    if "linkedin" in platforms:
+        workflow["71"] = {
+            "class_type": "LinkedinPosterData",
+            "inputs": {
+                "caption": _render_socialman_template(
+                    publish.get("description_template"),
+                    default=description_text,
+                    persona_name=persona_name,
+                    prompt_text=prompt_text,
+                    platform="linkedin",
+                ),
+            },
+        }
+        workflow["62"]["inputs"]["linkedin_data"] = ["71", 0]
+
+    if "facebook" in platforms:
+        workflow["72"] = {
+            "class_type": "FacebookPosterData",
+            "inputs": {
+                "target_account": None,
+                "caption": _render_socialman_template(
+                    publish.get("description_template"),
+                    default=description_text,
+                    persona_name=persona_name,
+                    prompt_text=prompt_text,
+                    platform="facebook",
+                ),
+                "post_to_story": False,
+                "fb_thumbnail": None,
+            },
+        }
+        workflow["62"]["inputs"]["facebook_data"] = ["72", 0]
+
+    if "instagram" in platforms:
+        workflow["73"] = {
+            "class_type": "InstagramPosterData",
+            "inputs": {
+                "target_account": None,
+                "caption": _render_socialman_template(
+                    publish.get("description_template"),
+                    default=description_text,
+                    persona_name=persona_name,
+                    prompt_text=prompt_text,
+                    platform="instagram",
+                ),
+                "post_to_story": False,
+                "insta_thumbnail": None,
+            },
+        }
+        workflow["62"]["inputs"]["instagram_data"] = ["73", 0]
+
+    if "pinterest" in platforms:
+        workflow["74"] = {
+            "class_type": "PinterestPosterData",
+            "inputs": {
+                "target_board": None,
+                "title": _render_socialman_template(
+                    publish.get("title_template"),
+                    default=title_text,
+                    persona_name=persona_name,
+                    prompt_text=prompt_text,
+                    platform="pinterest",
+                ),
+                "description": _render_socialman_template(
+                    publish.get("description_template"),
+                    default=description_text,
+                    persona_name=persona_name,
+                    prompt_text=prompt_text,
+                    platform="pinterest",
+                ),
+                "link": "",
+                "pin_thumbnail": None,
+            },
+        }
+        workflow["62"]["inputs"]["pinterest_data"] = ["74", 0]
+
+    if "tiktok" in platforms:
+        workflow["75"] = {
+            "class_type": "TiktokPosterData",
+            "inputs": {
+                "caption": _render_socialman_template(
+                    publish.get("description_template"),
+                    default=description_text,
+                    persona_name=persona_name,
+                    prompt_text=prompt_text,
+                    platform="tiktok",
+                ),
+                "photo_title": _render_socialman_template(
+                    publish.get("title_template"),
+                    default=title_text,
+                    persona_name=persona_name,
+                    prompt_text=prompt_text,
+                    platform="tiktok",
+                ),
+                "video_cover_timestamp_percent_from_0_to_1": 0.5,
+                "privacy": "PUBLIC_TO_EVERYONE",
+                "users_can_comment": True,
+                "users_can_duet": True,
+                "users_can_stitch": True,
+                "content_disclosure_enabled": False,
+                "content_disclosure_branded_content": False,
+                "content_disclosure_your_brand": False,
+            },
+        }
+        workflow["62"]["inputs"]["tiktok_data"] = ["75", 0]
+
+    return workflow, True
+
+
+def _history_execution_error(job: dict) -> Optional[str]:
+    status = job.get("status") or {}
+    status_str = str(status.get("status_str") or "").lower()
+    messages = status.get("messages") or []
+    for message in messages:
+        if not isinstance(message, (list, tuple)) or not message:
+            continue
+        event_type = str(message[0]).lower()
+        payload = message[-1]
+        if event_type == "execution_error":
+            if isinstance(payload, dict):
+                return payload.get("exception_message") or payload.get("error") or json.dumps(payload)
+            return str(payload)
+    if status_str == "error":
+        return "ComfyUI execution error"
+    return None
 
 
 def _ws_listener():
@@ -908,7 +1180,15 @@ def queue_video(
         resp = requests.post(f"{COMFY_BASE}/prompt", json=payload, timeout=15)
         resp.raise_for_status()
         data = resp.json()
-        logger.info("Queued video (i2v=%s): %s", bool(start_image), data.get("prompt_id"))
+        if "error" in data or data.get("node_errors"):
+            logger.error(
+                "ComfyUI workflow error (i2v=%s): %s | node_errors: %s",
+                bool(start_image),
+                data.get("error"),
+                data.get("node_errors"),
+            )
+        else:
+            logger.info("Queued video (i2v=%s): %s", bool(start_image), data.get("prompt_id"))
         return data
     except requests.ConnectionError:
         logger.error("Cannot reach ComfyUI at %s", COMFY_BASE)
@@ -941,6 +1221,9 @@ def get_video_job_status(prompt_id: str) -> dict:
             return {"status": "pending", "outputs": []}
 
         job = history[prompt_id]
+        execution_error = _history_execution_error(job)
+        if execution_error:
+            return {"status": "error", "detail": execution_error}
         outputs = []
         for node_id, node_out in job.get("outputs", {}).items():
             for img in node_out.get("images", []):
@@ -984,6 +1267,7 @@ def queue_prompt(
     model_profile: Optional[str] = None,
     lora_strength_model: float = 0.85,
     lora_strength_clip: float = 0.85,
+    socialman_publish: Optional[dict] = None,
 ) -> dict:
     """Queue a generation job on ComfyUI. Uses Redux workflow if reference_image is provided."""
     profile_name = (model_profile or "flux_schnell").lower()
@@ -1016,6 +1300,7 @@ def queue_prompt(
             lora_strength_model=lora_strength_model,
             lora_strength_clip=lora_strength_clip,
         )
+    workflow, socialman_applied = _inject_socialman_nodes(workflow, socialman_publish, image_node_id="8")
     payload = {
         "prompt": workflow,
         "client_id": CLIENT_ID,
@@ -1024,7 +1309,16 @@ def queue_prompt(
         resp = requests.post(f"{COMFY_BASE}/prompt", json=payload, timeout=15)
         resp.raise_for_status()
         data = resp.json()
-        logger.info("Queued prompt (redux=%s): %s", bool(reference_image), data.get("prompt_id"))
+        if "error" in data or data.get("node_errors"):
+            logger.error(
+                "ComfyUI workflow error (redux=%s): %s | node_errors: %s",
+                bool(reference_image),
+                data.get("error"),
+                data.get("node_errors"),
+            )
+        else:
+            logger.info("Queued prompt (redux=%s): %s", bool(reference_image), data.get("prompt_id"))
+        data["socialman_applied"] = socialman_applied
         return data
     except requests.ConnectionError:
         logger.error("Cannot reach ComfyUI at %s", COMFY_BASE)
@@ -1045,6 +1339,9 @@ def get_job_status(prompt_id: str) -> dict:
             return {"status": "pending", "outputs": []}
 
         job = history[prompt_id]
+        execution_error = _history_execution_error(job)
+        if execution_error:
+            return {"status": "error", "detail": execution_error}
         outputs = []
         for node_id, node_out in job.get("outputs", {}).items():
             for img in node_out.get("images", []):

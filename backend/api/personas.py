@@ -14,11 +14,11 @@ from sqlalchemy.orm import Session
 
 try:
     from ..database import get_db, SessionLocal, Persona, Content
-    from ..schemas import PersonaCreate, PersonaOut, LoraTrainingRequest
+    from ..schemas import PersonaCreate, PersonaOut, PersonaSocialManConfigIn, LoraTrainingRequest
     from .. import comfy_api
 except ImportError:
     from database import get_db, SessionLocal, Persona, Content
-    from schemas import PersonaCreate, PersonaOut, LoraTrainingRequest
+    from schemas import PersonaCreate, PersonaOut, PersonaSocialManConfigIn, LoraTrainingRequest
     import comfy_api
 
 logger = logging.getLogger(__name__)
@@ -68,6 +68,15 @@ PERSONALITY_MOODS = {
     "default": {"rate": "+0%", "pitch": "+0Hz", "volume": "+0%", "style": "chat", "preview": "Hey babe, it's {name}. Come say hi to me."},
 }
 
+SOCIALMAN_SUPPORTED_PLATFORMS = {
+    "facebook",
+    "instagram",
+    "linkedin",
+    "pinterest",
+    "tiktok",
+    "twitter",
+}
+
 
 def _match_personality_mood(personality: Optional[str]) -> dict:
     if not personality:
@@ -105,6 +114,29 @@ def _match_personality_mood(personality: Optional[str]) -> dict:
     return PERSONALITY_MOODS["default"]
 
 
+def _normalize_socialman_platforms(platforms: Optional[List[str]]) -> list[str]:
+    normalized: list[str] = []
+    for platform in platforms or []:
+        value = (platform or "").strip().lower()
+        if value in SOCIALMAN_SUPPORTED_PLATFORMS and value not in normalized:
+            normalized.append(value)
+    return normalized
+
+
+def _clean_optional_text(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def _validate_socialman_state(*, enabled: bool, token: Optional[str], platforms: list[str]) -> None:
+    if enabled and not token:
+        raise HTTPException(status_code=400, detail="SocialMan token is required when auto-post is enabled")
+    if enabled and not platforms:
+        raise HTTPException(status_code=400, detail="Select at least one SocialMan platform when auto-post is enabled")
+
+
 # ── Persona CRUD ─────────────────────────────────────────────────────
 
 @router.post("/personas/", response_model=PersonaOut)
@@ -112,7 +144,25 @@ def create_persona(body: PersonaCreate, db: Session = Depends(get_db)):
     existing = db.query(Persona).filter(Persona.name == body.name).first()
     if existing:
         raise HTTPException(status_code=409, detail="Persona name already exists")
-    persona = Persona(name=body.name, prompt_base=body.prompt_base, lora_name=body.lora_name)
+    socialman_token = _clean_optional_text(body.socialman_token)
+    socialman_platforms = _normalize_socialman_platforms(body.socialman_platforms)
+    _validate_socialman_state(
+        enabled=body.socialman_enabled,
+        token=socialman_token,
+        platforms=socialman_platforms,
+    )
+    persona = Persona(
+        name=body.name,
+        prompt_base=body.prompt_base,
+        lora_name=body.lora_name,
+        personality=_clean_optional_text(body.personality),
+        voice=_clean_optional_text(body.voice),
+        socialman_token=socialman_token,
+        socialman_enabled=bool(body.socialman_enabled and socialman_token and socialman_platforms),
+        socialman_platforms=socialman_platforms or None,
+        socialman_title_template=_clean_optional_text(body.socialman_title_template),
+        socialman_description_template=_clean_optional_text(body.socialman_description_template),
+    )
     db.add(persona)
     db.commit()
     db.refresh(persona)
@@ -130,6 +180,52 @@ def get_persona(persona_id: int, db: Session = Depends(get_db)):
     if not persona:
         raise HTTPException(status_code=404, detail="Persona not found")
     return persona
+
+
+@router.post("/personas/{persona_id}/socialman", response_model=PersonaOut)
+def set_persona_socialman(persona_id: int, body: PersonaSocialManConfigIn, db: Session = Depends(get_db)):
+    persona = db.query(Persona).filter(Persona.id == persona_id).first()
+    if not persona:
+        raise HTTPException(status_code=404, detail="Persona not found")
+
+    token = persona.socialman_token
+    if body.clear_token:
+        token = None
+    elif body.token is not None:
+        token = _clean_optional_text(body.token)
+
+    platforms = persona.socialman_platforms or []
+    if body.platforms is not None:
+        platforms = _normalize_socialman_platforms(body.platforms)
+
+    _validate_socialman_state(enabled=body.enabled, token=token, platforms=platforms)
+
+    persona.socialman_token = token
+    persona.socialman_enabled = bool(body.enabled and token and platforms)
+    persona.socialman_platforms = platforms or None
+    if body.title_template is not None:
+        persona.socialman_title_template = _clean_optional_text(body.title_template)
+    if body.description_template is not None:
+        persona.socialman_description_template = _clean_optional_text(body.description_template)
+
+    db.commit()
+    db.refresh(persona)
+    return persona
+
+
+@router.delete("/personas/{persona_id}/socialman")
+def clear_persona_socialman(persona_id: int, db: Session = Depends(get_db)):
+    persona = db.query(Persona).filter(Persona.id == persona_id).first()
+    if not persona:
+        raise HTTPException(status_code=404, detail="Persona not found")
+
+    persona.socialman_token = None
+    persona.socialman_enabled = False
+    persona.socialman_platforms = None
+    persona.socialman_title_template = None
+    persona.socialman_description_template = None
+    db.commit()
+    return {"status": "removed"}
 
 
 @router.delete("/personas/{persona_id}")

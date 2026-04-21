@@ -2,7 +2,7 @@
 title WinEmpire - AI Content Empire Launcher
 cd /d "%~dp0"
 
-if "%BACKEND_APP_MODULE%"=="" set "BACKEND_APP_MODULE=backend.main:app"
+set "BACKEND_APP_MODULE=backend.main:app"
 
 echo.
 echo  ========================================
@@ -11,7 +11,7 @@ echo  ========================================
 echo   Role     : Shadow (EMPIRE_ROLE=shadow)
 echo   Backend  :8800  (LAN + Tailscale)
 echo   Frontend :3000  (local dev)
-echo   ComfyUI  :8000  (local only)
+echo   ComfyUI  :3900  (local only)
 echo  ----------------------------------------
 echo   Quick Connect to Mac:
 echo     Tailscale : http://100.119.54.18:8800
@@ -55,7 +55,7 @@ echo Backend module: %BACKEND_APP_MODULE%
 
 :: Start Backend (FastAPI on 0.0.0.0:8800 — accessible via Tailscale + LAN)
 echo Starting Backend (FastAPI :8800, role=shadow)...
-start "WinEmpire - Backend :8800" cmd /k "cd /d "%~dp0" && .venv\Scripts\activate.bat && set EMPIRE_ROLE=shadow && python -m uvicorn %BACKEND_APP_MODULE% --host 0.0.0.0 --port 8800 --reload"
+start "WinEmpire - Backend :8800" cmd /k "cd /d "%~dp0" && .venv\Scripts\activate.bat && set EMPIRE_ROLE=shadow && set COMFY_PORT=3900 && python -m uvicorn %BACKEND_APP_MODULE% --host 0.0.0.0 --port 8800 --reload"
 
 timeout /t 2 /nobreak >nul
 

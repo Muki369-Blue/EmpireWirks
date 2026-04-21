@@ -97,67 +97,21 @@ def generate_images(persona_id: int, body: GenerationRequest, db: Session = Depe
     model_tag = f"model:{model_profile}"
     results = []
 
-    ref_comfy_name = None
-    if persona.reference_image and Path(persona.reference_image).exists():
-        ref_comfy_name = comfy_api.upload_image_to_comfyui(persona.reference_image)
-
+    # Enqueue each item to the worker — do NOT dispatch to ComfyUI directly.
+    # The single-threaded worker serialises all ComfyUI calls so models are
+    # loaded one at a time and unloaded between runs (36 GB unified memory).
     for _ in range(body.batch_size):
-        comfy_resp = comfy_api.queue_prompt(
-            full_prompt,
-            lora,
-            reference_image=ref_comfy_name,
-            negative_prompt=body.negative_prompt,
-            model_profile=model_profile,
-            lora_strength_model=body.lora_strength_model,
-            lora_strength_clip=body.lora_strength_clip,
-        )
-
-        if "error" in comfy_resp:
-            content = Content(
-                persona_id=persona.id,
-                prompt_used=full_prompt,
-                status="failed",
-                tags=f"image,{model_tag}",
-            )
-            db.add(content)
-            db.commit()
-            db.refresh(content)
-            try:
-                job = jobs_service.create_job(
-                    db,
-                    job_type="image",
-                    persona_id=persona.id,
-                    content_id=content.id,
-                    payload={
-                        "prompt": full_prompt,
-                        "lora": lora,
-                        "negative_prompt": body.negative_prompt,
-                        "model_profile": model_profile,
-                        "lora_strength_model": body.lora_strength_model,
-                        "lora_strength_clip": body.lora_strength_clip,
-                    },
-                    machine=MACHINE_LABEL,
-                )
-                jobs_service.transition(db, job, JobState.FAILED, error=comfy_resp.get("error"))
-                db.commit()
-            except Exception as exc:
-                logger.warning("job mirror (image failed) skipped: %s", exc)
-                db.rollback()
-            results.append(content)
-            continue
-
         content = Content(
             persona_id=persona.id,
             prompt_used=full_prompt,
-            comfy_job_id=comfy_resp.get("prompt_id"),
-            status="generating",
+            status="queued",
             tags=f"image,{model_tag}",
         )
         db.add(content)
         db.commit()
         db.refresh(content)
         try:
-            job = jobs_service.create_job(
+            jobs_service.create_job(
                 db,
                 job_type="image",
                 persona_id=persona.id,
@@ -166,29 +120,15 @@ def generate_images(persona_id: int, body: GenerationRequest, db: Session = Depe
                     "prompt": full_prompt,
                     "lora": lora,
                     "negative_prompt": body.negative_prompt,
-                    "reference_image": ref_comfy_name,
-                    "comfy_prompt_id": comfy_resp.get("prompt_id"),
                     "model_profile": model_profile,
                     "lora_strength_model": body.lora_strength_model,
                     "lora_strength_clip": body.lora_strength_clip,
                 },
                 machine=MACHINE_LABEL,
             )
-            jobs_service.transition(db, job, JobState.DISPATCHING)
-            jobs_service.transition(db, job, JobState.RUNNING)
-            jobs_service.record_run(
-                db,
-                job,
-                prompt=full_prompt,
-                negative_prompt=body.negative_prompt,
-                loras=[{"name": lora, "strength": body.lora_strength_model}] if lora else None,
-                backend="comfy",
-                machine=MACHINE_LABEL,
-                model=model_profile,
-            )
             db.commit()
         except Exception as exc:
-            logger.warning("job mirror (image queue) skipped: %s", exc)
+            logger.warning("Job enqueue failed: %s", exc)
             db.rollback()
         results.append(content)
 
@@ -283,22 +223,29 @@ def retry_generation(content_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Already completed")
 
     persona = db.query(Persona).filter(Persona.id == content.persona_id).first()
-    ref_comfy_name = None
-    if persona and persona.reference_image and Path(persona.reference_image).exists():
-        ref_comfy_name = comfy_api.upload_image_to_comfyui(persona.reference_image)
 
-    comfy_resp = comfy_api.queue_prompt(content.prompt_used, persona.lora_name if persona else None, reference_image=ref_comfy_name)
-
-    if "error" in comfy_resp:
-        content.status = "failed"
-        db.commit()
-        return {"status": "failed", "error": comfy_resp["error"]}
-
-    content.comfy_job_id = comfy_resp.get("prompt_id")
-    content.status = "generating"
+    # Re-enqueue to the worker queue so models unload between runs
+    content.status = "queued"
+    content.comfy_job_id = None
     db.commit()
-    db.refresh(content)
-    return {"status": "generating", "comfy_job_id": content.comfy_job_id}
+    try:
+        jobs_service.create_job(
+            db,
+            job_type="image",
+            persona_id=content.persona_id,
+            content_id=content.id,
+            payload={
+                "prompt": content.prompt_used,
+                "lora": persona.lora_name if persona else None,
+                "model_profile": "flux_schnell",
+            },
+            machine=MACHINE_LABEL,
+        )
+        db.commit()
+    except Exception as exc:
+        logger.warning("Retry enqueue failed: %s", exc)
+        db.rollback()
+    return {"status": "queued", "content_id": content.id}
 
 
 # ── Cancel / Stop ───────────────────────────────────────────────────
@@ -309,7 +256,7 @@ def cancel_active_generations(db: Session = Depends(get_db)):
     interrupted = comfy_api.interrupt()
     cleared = comfy_api.clear_queue()
 
-    active = db.query(Content).filter(Content.status.in_(["generating", "pending"])).all()
+    active = db.query(Content).filter(Content.status.in_(["generating", "pending", "queued"])).all()
     cancelled_ids = []
     for content in active:
         content.status = "failed"

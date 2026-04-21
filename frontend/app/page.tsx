@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import PersonaForm from "./components/PersonaForm";
+import SocialManPanel from "./components/SocialManPanel";
 import GenerationPanel from "./components/GenerationPanel";
 import LinkManager from "./components/LinkManager";
 import SchedulePanel from "./components/SchedulePanel";
@@ -324,8 +325,9 @@ export default function Dashboard() {
 
       {/* ─── Personas Tab ─── */}
       <div className={tab === "personas" ? "" : "hidden"}>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6 mb-8">
           <PersonaForm onCreated={refresh} />
+          <SocialManPanel personas={personas} onChanged={refresh} />
           <LinkManager links={links} onChanged={refresh} />
         </div>
 
@@ -374,6 +376,13 @@ export default function Dashboard() {
                     {p.lora_name && (
                       <span className="text-[10px] text-purple-300 bg-purple-900/30 px-2 py-0.5 rounded">
                         LoRA: {p.lora_name}
+                      </span>
+                    )}
+                    {p.socialman_configured && (
+                      <span className={`text-[10px] px-2 py-0.5 rounded ${p.socialman_enabled ? "text-cyan-300 bg-cyan-900/30" : "text-zinc-300 bg-zinc-800"}`}>
+                        {p.socialman_enabled
+                          ? `SocialMan: ${(p.socialman_platforms ?? []).join(", ") || "ready"}`
+                          : "SocialMan saved"}
                       </span>
                     )}
                     {p.reference_image ? (

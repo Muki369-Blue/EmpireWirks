@@ -37,6 +37,11 @@ def _scheduler_loop():
         from database import SessionLocal, Schedule, Persona, Content, Campaign, CampaignTask
         from services import orchestrator
         import comfy_api
+        from services import jobs as jobs_service
+        from config import MACHINE_LABEL
+    else:
+        from .services import jobs as jobs_service
+        from .config import MACHINE_LABEL
 
     logger.info("Scheduler started")
 
@@ -71,15 +76,25 @@ def _scheduler_loop():
                     )
 
                     for _ in range(sched.batch_size):
-                        comfy_resp = comfy_api.queue_prompt(full_prompt, persona.lora_name)
-                        status = "failed" if "error" in comfy_resp else "generating"
                         content = Content(
                             persona_id=persona.id,
                             prompt_used=full_prompt,
-                            comfy_job_id=comfy_resp.get("prompt_id"),
-                            status=status,
+                            status="queued",
                         )
                         db.add(content)
+                        db.flush()
+                        jobs_service.create_job(
+                            db,
+                            job_type="image",
+                            persona_id=persona.id,
+                            content_id=content.id,
+                            payload={
+                                "prompt": full_prompt,
+                                "lora": persona.lora_name,
+                                "model_profile": "flux_schnell",
+                            },
+                            machine=MACHINE_LABEL,
+                        )
 
                     sched.last_run = now
                     sched.next_run = _next_run(sched.cron_expression, now)

@@ -14,6 +14,11 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 EMPIRE_ROLE: str = os.environ.get("EMPIRE_ROLE", "hub").lower()
+if not os.environ.get("EMPIRE_ROLE"):
+    # On Windows shadow workers default to shadow when role is not explicitly set.
+    EMPIRE_ROLE = "shadow" if os.name == "nt" else "hub"
+if EMPIRE_ROLE not in {"hub", "shadow"}:
+    EMPIRE_ROLE = "hub"
 IS_HUB: bool = EMPIRE_ROLE == "hub"
 IS_SHADOW: bool = EMPIRE_ROLE == "shadow"
 
@@ -21,7 +26,7 @@ IS_SHADOW: bool = EMPIRE_ROLE == "shadow"
 COMFY_PORT: int = int(os.environ.get("COMFY_PORT", "8000"))
 
 # Shadow-Wirk remote URL (only meaningful on the hub)
-SHADOW_URL: str = os.environ.get("SHADOW_WIRKS_URL", "http://100.119.54.18:8800") if IS_HUB else ""
+SHADOW_URL: str = os.environ.get("SHADOW_WIRKS_URL", "http://100.126.90.91:8800") if IS_HUB else ""
 
 # Label stamped on generation jobs so we know which machine produced them
 MACHINE_LABEL: str = "mac" if IS_HUB else "shadow"
